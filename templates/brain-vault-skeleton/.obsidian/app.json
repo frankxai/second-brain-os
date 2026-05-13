@@ -1,0 +1,9 @@
+{
+  "promptDelete": true,
+  "showLineNumber": false,
+  "showInlineTitle": true,
+  "alwaysUpdateLinks": true,
+  "newFileFolderPath": "_inbox/manual",
+  "useMarkdownLinks": false,
+  "newLinkFormat": "shortest"
+}
