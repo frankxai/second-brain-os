@@ -1,0 +1,32 @@
+{
+  "name": "second-brain-os",
+  "version": "0.1.0",
+  "license": "MIT",
+  "sip_version": "1.1.1",
+  "transport": "stdio",
+  "depends_on": [
+    {
+      "name": "obsidian-local-rest-api",
+      "type": "obsidian-plugin",
+      "version": "3.6.2",
+      "url": "https://github.com/coddingtonbear/obsidian-local-rest-api"
+    },
+    {
+      "name": "mcp-obsidian",
+      "type": "mcp-server",
+      "version": "main",
+      "commit_pin": "PINNED_AT_RELEASE_TIME",
+      "url": "https://github.com/MarkusPfundstein/mcp-obsidian"
+    }
+  ],
+  "tools": [
+    "list_files_in_vault",
+    "get_file_contents",
+    "search",
+    "patch_content",
+    "append_content"
+  ],
+  "vault_root_env_var": "SBO_BRAIN_VAULT_ROOT",
+  "vault_root_default": "${HOME}/second-brain/brain",
+  "private_vault_root_must_not_be_served": "${HOME}/second-brain/private"
+}

@@ -1,0 +1,45 @@
+[project]
+name = "sbo-ingestion"
+version = "0.1.0"
+description = "Second Brain OS — chat-export ingestion pipeline (Claude.ai + ChatGPT → dual-write to brain/ + private/)"
+license = { text = "MIT" }
+authors = [{ name = "Frank Riemer" }]
+readme = "README.md"
+requires-python = ">=3.11"
+
+dependencies = [
+  "anthropic>=0.40.0",
+  "click>=8.1.7",
+  "python-frontmatter>=1.1.0",
+  "python-slugify>=8.0.4",
+  "tenacity>=8.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+  "pytest-asyncio>=0.24.0",
+  "pytest-cov>=5.0.0",
+  "ruff>=0.7.0",
+]
+
+[project.scripts]
+sbo-ingest = "sbo_ingestion.ingest:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sbo_ingestion"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
