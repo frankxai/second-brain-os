@@ -1,0 +1,9 @@
+# This marker file is the SBO assertion that Obsidian Sync MUST NOT be enabled in this vault.
+# The privacy contract depends on it.
+#
+# If you've ever enabled Sync in this vault, treat the vault as compromised:
+# 1. Audit Sync history in Obsidian settings.
+# 2. Reset your vault encryption key.
+# 3. Consider rotating any credentials mentioned in private notes.
+#
+# Setup scripts check for this file's presence. Deleting it does not disable the check.
