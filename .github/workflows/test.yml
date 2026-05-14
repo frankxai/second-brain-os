@@ -32,11 +32,15 @@ jobs:
       - name: Run tests
         run: pytest -v
 
-      - name: Verify privacy hardening on skeleton (Unix)
+      - name: Verify privacy hardening on skeleton (Unix, template mode)
         if: runner.os != 'Windows'
+        env:
+          SBO_VERIFY_MODE: template
         run: bash scripts/verify-privacy.sh templates/private-vault-skeleton
 
-      - name: Verify privacy hardening on skeleton (Windows)
+      - name: Verify privacy hardening on skeleton (Windows, template mode)
         if: runner.os == 'Windows'
+        env:
+          SBO_VERIFY_MODE: template
         shell: pwsh
         run: ./scripts/verify-privacy.ps1 templates/private-vault-skeleton

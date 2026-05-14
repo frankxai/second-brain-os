@@ -1,9 +1,22 @@
 #!/usr/bin/env bash
-# Verify the 6-item SBO privacy hardening checklist for a private vault.
+# Verify the SBO privacy hardening checklist for a private vault.
 #
-# Usage: ./scripts/verify-privacy.sh /path/to/private-vault
+# Two modes:
+#   strict   (default)        — all 6 checks must pass; runs on a real install
+#   template (SBO_VERIFY_MODE=template) — only vault-shape checks (marker files,
+#                                          no banned plugins, not inside cloud
+#                                          paths). Skips machine-level checks
+#                                          (Windows Search exclusion list,
+#                                          macOS Time Machine exclusion).
+#                                          Used by CI on the template skeleton.
+#
+# Usage:
+#   ./scripts/verify-privacy.sh /path/to/private-vault
+#   SBO_VERIFY_MODE=template ./scripts/verify-privacy.sh templates/private-vault-skeleton
 
 set -euo pipefail
+
+MODE="${SBO_VERIFY_MODE:-strict}"
 
 PRIVATE_VAULT="${1:-}"
 if [[ -z "$PRIVATE_VAULT" ]]; then
@@ -46,18 +59,24 @@ check_spotlight() {
 }
 
 # 3. Cloud-backup exclusion
+#    - Path-shape check (vault location): runs in all modes
+#    - tmutil exclusion (macOS machine state): strict mode only
 check_backup() {
-  # macOS Time Machine
-  if [[ "$(uname)" == "Darwin" ]]; then
+  # iCloud / OneDrive path-shape check (template-deterministic)
+  if [[ "$PRIVATE_VAULT" == *"iCloud"* ]] || [[ "$PRIVATE_VAULT" == *"Mobile Documents"* ]]; then
+    echo -n "(vault inside iCloud — move out) "
+    return 1
+  fi
+  if [[ -n "${OneDrive:-}" ]] && [[ "$PRIVATE_VAULT" == "$OneDrive"* ]]; then
+    echo -n "(vault inside OneDrive — move out) "
+    return 1
+  fi
+  # macOS Time Machine exclusion (machine-level — only checked in strict mode)
+  if [[ "$MODE" == "strict" ]] && [[ "$(uname)" == "Darwin" ]]; then
     if tmutil isexcluded "$PRIVATE_VAULT" 2>/dev/null | grep -q "Excluded"; then
       return 0
     fi
     echo -n "(macOS: add via tmutil addexclusion) "
-    return 1
-  fi
-  # iCloud Drive check
-  if [[ "$PRIVATE_VAULT" == *"iCloud"* ]] || [[ "$PRIVATE_VAULT" == *"Mobile Documents"* ]]; then
-    echo -n "(vault inside iCloud — move out) "
     return 1
   fi
   return 0
@@ -80,7 +99,7 @@ check_no_llm_plugins() {
 }
 
 echo ""
-echo "SBO Privacy Verification"
+echo "SBO Privacy Verification (mode: $MODE)"
 echo ""
 echo "Vault: $PRIVATE_VAULT"
 echo ""
