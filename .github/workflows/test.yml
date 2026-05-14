@@ -1,0 +1,42 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" || pip install -e . pytest
+
+      - name: Run tests
+        run: pytest -v
+
+      - name: Verify privacy hardening on skeleton (Unix)
+        if: runner.os != 'Windows'
+        run: bash scripts/verify-privacy.sh templates/private-vault-skeleton
+
+      - name: Verify privacy hardening on skeleton (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/verify-privacy.ps1 templates/private-vault-skeleton
