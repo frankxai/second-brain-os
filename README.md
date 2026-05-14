@@ -4,7 +4,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Built on SIP](https://img.shields.io/badge/Built%20on-SIP%20v1.1.1-blue.svg)](https://github.com/frankxai/Starlight-Intelligence-System)
-[![Tests](https://img.shields.io/badge/tests-28%2F28-brightgreen.svg)](#testing)
+[![Tests](https://github.com/frankxai/second-brain-os/actions/workflows/test.yml/badge.svg)](https://github.com/frankxai/second-brain-os/actions/workflows/test.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 
 **Status:** v0.1.0 — first OSS release.
 
@@ -40,6 +41,17 @@ pwsh ./scripts/setup.ps1     # Windows
 ```
 
 See [`docs/getting-started.md`](docs/getting-started.md) for the full walkthrough.
+
+### Smoke-test the install (no API key required)
+
+```bash
+sbo-ingest tests/fixtures/claude-ai-export-sample.jsonl \
+  --brain-root /path/to/brain \
+  --private-root /path/to/private \
+  --dry-run
+```
+
+`--dry-run` skips summarization. You get the dual-write structure (raw → `private/`, stub-summary → `brain/_inbox/`) so you can verify the boundary holds before spending a single token.
 
 ## What you get
 

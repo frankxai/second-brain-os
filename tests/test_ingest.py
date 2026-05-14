@@ -55,3 +55,38 @@ def test_ingest_unknown_format_raises(
         assert "format" in str(e).lower() or "unknown" in str(e).lower()
     else:
         raise AssertionError("Should have raised ValueError for unknown format")
+
+
+def test_ingest_dry_run_skips_api(
+    claude_ai_export_path: Path,
+    tmp_vault_pair: tuple[Path, Path],
+) -> None:
+    """Dry-run must not call the Anthropic API and must still produce both files."""
+    brain, private = tmp_vault_pair
+    # No api_key, no mock — proves no network call happens.
+    result = ingest(
+        claude_ai_export_path,
+        brain_root=brain,
+        private_root=private,
+        dry_run=True,
+    )
+    assert len(result) == 2
+    assert all(r.private_path.exists() for r in result)
+    assert all(r.brain_path.exists() for r in result)
+    # Stub-summary marker visible in brain output
+    sample = result[0].brain_path.read_text(encoding="utf-8")
+    assert "dry-run" in sample.lower()
+
+
+def test_ingest_requires_api_key_unless_dry_run(
+    claude_ai_export_path: Path,
+    tmp_vault_pair: tuple[Path, Path],
+) -> None:
+    """Without dry_run and without an api_key, ingest must raise — never silently call Anthropic."""
+    brain, private = tmp_vault_pair
+    try:
+        ingest(claude_ai_export_path, brain_root=brain, private_root=private)
+    except ValueError as e:
+        assert "api_key" in str(e).lower()
+    else:
+        raise AssertionError("Should have raised ValueError when api_key missing")
