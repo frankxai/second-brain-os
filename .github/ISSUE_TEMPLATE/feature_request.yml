@@ -1,0 +1,39 @@
+name: Feature request
+description: Suggest an enhancement that fits the SBO template philosophy
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        SBO is intentionally small and opinionated. Read `docs/architecture.md` and `docs/paid-tier.md` before filing — many "missing" features live on the paid tier on purpose.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the pain in plain language. No solution required yet.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed direction (optional)
+      description: If you have an idea, sketch it. If not, leave blank.
+  - type: checkboxes
+    id: privacy-impact
+    attributes:
+      label: Privacy impact
+      options:
+        - label: This proposal does NOT add any path from MCP / LLM tools to `private/`
+          required: true
+        - label: This proposal does NOT mandate a cloud service for the OSS template
+          required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope you think this fits
+      options:
+        - OSS template (free)
+        - Paid tier (frankx/second-brain-pro)
+        - Unsure
+    validations:
+      required: true

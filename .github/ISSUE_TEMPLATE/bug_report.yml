@@ -1,0 +1,54 @@
+name: Bug report
+description: Something doesn't work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. The more reproducible the report, the faster the fix.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what actually happened?
+      placeholder: |
+        1. I ran `sbo-ingest /path/to/conversations.json`
+        2. I expected files in `brain/_inbox/claude-ai/`
+        3. Got error: ...
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Exact command run
+      placeholder: sbo-ingest /path/to/conversations.json
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS + Python version
+      placeholder: "Windows 11, Python 3.13.7"
+    validations:
+      required: true
+  - type: input
+    id: sbo-version
+    attributes:
+      label: SBO version / commit
+      placeholder: "v0.1.0 or commit SHA"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / stack trace
+      render: shell
+  - type: checkboxes
+    id: privacy-check
+    attributes:
+      label: Privacy verification
+      options:
+        - label: I ran `bash scripts/verify-privacy.sh` (or `.ps1`) and it passes 6/6
+          required: false
+        - label: This bug does NOT involve sharing the content of my private vault
+          required: true

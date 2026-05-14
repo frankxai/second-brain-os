@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Read the docs first
+    url: https://github.com/frankxai/second-brain-os/tree/main/docs
+    about: Most setup, privacy, and architecture questions are answered in docs/.
+  - name: SIP substrate
+    url: https://github.com/frankxai/Starlight-Intelligence-System
+    about: SBO is a vertical that composes the Starlight Intelligence Protocol.
+  - name: frankx.ai
+    url: https://frankx.ai
+    about: Paid tier, articles, and the rest of the FrankX OS.
