@@ -31,10 +31,21 @@ Direct, technical, warm. Pattern recognition as poetry. No AI-slop ("delve", "di
 
 ## Slash commands
 
-- `/distill-inbox` — triage brain/_inbox/ into atomic notes (proposals only, never auto-move)
+- `/distill-inbox` — triage and fill brain/_inbox/ stubs (reads private/ once for distillation, writes only to brain/)
 - `/people-update` — refresh brain/people/ via people-map agent
 - `/patterns-detect` — weekly pattern file via pattern-detector agent
 - `/sbo-verify` — health-check the installation
+- `/ingest-images` — vision-based image ingestion from any image folder
+
+## Image ingestion
+
+SBO can ingest images (notebook photos, screenshots, scans) via Claude vision. Use `/ingest-images` or the `sbo-images` CLI. Each image is:
+1. Classified by content type (handwritten_note, typed_text, sketch, table, todo_list, journal_entry, meeting_notes, diagram, mixed)
+2. Transcribed / described in markdown
+3. Written as a stub to `brain/_inbox/images/` for review
+4. Stored as original in `private/images/{content_type}/`
+
+The image pipeline respects the same dual-vault privacy contract as conversation ingestion.
 
 ## SIP attestation
 

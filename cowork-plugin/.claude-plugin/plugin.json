@@ -1,0 +1,9 @@
+{
+  "name": "second-brain-os",
+  "version": "0.2.0",
+  "description": "Second Brain OS — personal knowledge ingestion and distillation for Obsidian vaults. Ingest AI chat exports (Claude.ai, ChatGPT) and thousands of images (notebook photos, Notion screenshots, scans) directly into your brain vault. Classify, extract, and structure everything via Claude vision. Built on the SIP (Starlight Intelligence Protocol) dual-vault privacy model.",
+  "author": {
+    "name": "FrankX / Starlight Intelligence"
+  },
+  "keywords": ["second-brain", "obsidian", "knowledge-management", "ingestion", "vision", "sip", "personal-os"]
+}

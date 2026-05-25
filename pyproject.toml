@@ -25,6 +25,7 @@ dev = [
 
 [project.scripts]
 sbo-ingest = "sbo_ingestion.ingest:cli"
+sbo-images = "sbo_ingestion.image_ingest:cli"
 
 [build-system]
 requires = ["hatchling"]
