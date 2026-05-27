@@ -1,0 +1,57 @@
+{
+  "name": "second-brain-os",
+  "version": "0.1.0",
+  "description": "Second Brain OS — a build-in-public AI second-brain template for Obsidian. Two-vault hard privacy separation (public-share + private-substrate). Coding-agent-native. Composes the Starlight Intelligence Protocol (SIP) substrate.",
+  "author": {
+    "name": "Frank Riemer",
+    "email": "frank@frankx.ai",
+    "url": "https://frankx.ai"
+  },
+  "homepage": "https://github.com/frankxai/second-brain-os",
+  "repository": "https://github.com/frankxai/second-brain-os",
+  "license": "MIT",
+  "keywords": [
+    "second-brain",
+    "obsidian",
+    "knowledge-system",
+    "memory",
+    "two-vault",
+    "privacy-separation",
+    "build-in-public",
+    "agentic-ai",
+    "claude-code",
+    "sip"
+  ],
+  "categories": [
+    "second-brain",
+    "knowledge-system",
+    "memory",
+    "obsidian",
+    "agent-orchestration"
+  ],
+  "platforms": [
+    "claude-code",
+    "cursor",
+    "cline",
+    "codex",
+    "gemini-cli"
+  ],
+  "engines": {
+    "claude-code": ">=2.0.0",
+    "node": ">=20"
+  },
+  "compose": {
+    "extends": [
+      "sip-protocol"
+    ],
+    "absorbs": []
+  },
+  "principles": [
+    "Two vaults: public-share (Built-on-SIP attestation) + private-substrate (gitignored)",
+    "Hard privacy separation — no public surface ever reads from private",
+    "Coding-agent-native — every workflow runnable by Claude Code / Cursor / etc.",
+    "Obsidian as canonical UI — markdown + wikilinks + canvas",
+    "Build-in-public for the template; private for the operator"
+  ],
+  "attestation": "Built on SIP — Starlight Intelligence Protocol v1.1.1. License: MIT."
+}
