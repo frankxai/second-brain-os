@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/assets/hero.svg" width="100%" alt="Second Brain OS — Persistent memory · Cross-session knowledge · Personal intelligence layer"/>
+</p>
+
 # Second Brain OS
 
 > A build-in-public AI second-brain template for Obsidian. Two-vault hard privacy separation. Coding-agent-native. Composes the Starlight Intelligence Protocol (SIP).
