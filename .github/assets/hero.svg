@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" width="1200" height="300">
+<defs>
+  <radialGradient id="bg" cx="50%" cy="50%" r="70%">
+    <stop offset="0%" stop-color="#0a0f1a"/>
+    <stop offset="100%" stop-color="#0a0a0b"/>
+  </radialGradient>
+  <linearGradient id="cg" x1="0%" y1="0%" x2="100%" y2="0%">
+    <stop offset="0%" stop-color="#06b6d4"/>
+    <stop offset="100%" stop-color="#10b981"/>
+  </linearGradient>
+  <filter id="glow">
+    <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
+    <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+</defs>
+<rect width="1200" height="300" fill="url(#bg)"/>
+
+<!-- Central brain node -->
+<circle cx="600" cy="145" r="28" fill="none" stroke="#06b6d4" stroke-width="2" opacity="0.9" filter="url(#glow)"/>
+<circle cx="600" cy="145" r="14" fill="#06b6d4" opacity="0.3"/>
+<circle cx="600" cy="145" r="6" fill="#06b6d4" opacity="0.8"/>
+
+<!-- Spoke 1: top -->
+<line x1="600" y1="117" x2="600" y2="62" stroke="#06b6d4" stroke-width="1.5" opacity="0.5" stroke-dasharray="4,3">
+  <animate attributeName="stroke-dashoffset" values="14;0" dur="2s" repeatCount="indefinite"/>
+</line>
+<circle cx="600" cy="55" r="10" fill="none" stroke="#06b6d4" stroke-width="1.5" opacity="0.7"/>
+<circle cx="600" cy="55" r="4" fill="#06b6d4" opacity="0.6"/>
+
+<!-- Spoke 2: top-right -->
+<line x1="620" y1="127" x2="710" y2="72" stroke="#10b981" stroke-width="1.5" opacity="0.5" stroke-dasharray="4,3">
+  <animate attributeName="stroke-dashoffset" values="14;0" dur="2.4s" begin="0.3s" repeatCount="indefinite"/>
+</line>
+<circle cx="718" cy="67" r="10" fill="none" stroke="#10b981" stroke-width="1.5" opacity="0.7"/>
+<circle cx="718" cy="67" r="4" fill="#10b981" opacity="0.6"/>
+
+<!-- Spoke 3: right -->
+<line x1="628" y1="145" x2="740" y2="145" stroke="#06b6d4" stroke-width="1.5" opacity="0.5" stroke-dasharray="4,3">
+  <animate attributeName="stroke-dashoffset" values="14;0" dur="1.8s" begin="0.6s" repeatCount="indefinite"/>
+</line>
+<circle cx="750" cy="145" r="10" fill="none" stroke="#06b6d4" stroke-width="1.5" opacity="0.7"/>
+<circle cx="750" cy="145" r="4" fill="#06b6d4" opacity="0.6"/>
+
+<!-- Spoke 4: bottom-right -->
+<line x1="620" y1="163" x2="710" y2="218" stroke="#10b981" stroke-width="1.5" opacity="0.5" stroke-dasharray="4,3">
+  <animate attributeName="stroke-dashoffset" values="14;0" dur="2.2s" begin="0.9s" repeatCount="indefinite"/>
+</line>
+<circle cx="718" cy="223" r="10" fill="none" stroke="#10b981" stroke-width="1.5" opacity="0.7"/>
+<circle cx="718" cy="223" r="4" fill="#10b981" opacity="0.6"/>
+
+<!-- Spoke 5: bottom -->
+<line x1="600" y1="173" x2="600" y2="228" stroke="#06b6d4" stroke-width="1.5" opacity="0.5" stroke-dasharray="4,3">
+  <animate attributeName="stroke-dashoffset" values="14;0" dur="2s" begin="1.2s" repeatCount="indefinite"/>
+</line>
+<circle cx="600" cy="235" r="10" fill="none" stroke="#06b6d4" stroke-width="1.5" opacity="0.7"/>
+<circle cx="600" cy="235" r="4" fill="#06b6d4" opacity="0.6"/>
+
+<!-- Spoke 6: bottom-left -->
+<line x1="580" y1="163" x2="490" y2="218" stroke="#10b981" stroke-width="1.5" opacity="0.5" stroke-dasharray="4,3">
+  <animate attributeName="stroke-dashoffset" values="14;0" dur="2.4s" begin="1.5s" repeatCount="indefinite"/>
+</line>
+<circle cx="482" cy="223" r="10" fill="none" stroke="#10b981" stroke-width="1.5" opacity="0.7"/>
+<circle cx="482" cy="223" r="4" fill="#10b981" opacity="0.6"/>
+
+<!-- Spoke 7: left -->
+<line x1="572" y1="145" x2="460" y2="145" stroke="#06b6d4" stroke-width="1.5" opacity="0.5" stroke-dasharray="4,3">
+  <animate attributeName="stroke-dashoffset" values="14;0" dur="1.8s" begin="1.8s" repeatCount="indefinite"/>
+</line>
+<circle cx="450" cy="145" r="10" fill="none" stroke="#06b6d4" stroke-width="1.5" opacity="0.7"/>
+<circle cx="450" cy="145" r="4" fill="#06b6d4" opacity="0.6"/>
+
+<!-- Spoke 8: top-left -->
+<line x1="580" y1="127" x2="490" y2="72" stroke="#10b981" stroke-width="1.5" opacity="0.5" stroke-dasharray="4,3">
+  <animate attributeName="stroke-dashoffset" values="14;0" dur="2.2s" begin="2.1s" repeatCount="indefinite"/>
+</line>
+<circle cx="482" cy="67" r="10" fill="none" stroke="#10b981" stroke-width="1.5" opacity="0.7"/>
+<circle cx="482" cy="67" r="4" fill="#10b981" opacity="0.6"/>
+
+<!-- Cross-connections between outer nodes (partial) -->
+<line x1="600" y1="55" x2="718" y2="67" stroke="#10b981" stroke-width="1" opacity="0.2"/>
+<line x1="718" y1="223" x2="750" y2="145" stroke="#06b6d4" stroke-width="1" opacity="0.15"/>
+<line x1="482" y1="223" x2="450" y2="145" stroke="#06b6d4" stroke-width="1" opacity="0.15"/>
+<line x1="482" y1="67" x2="600" y2="55" stroke="#10b981" stroke-width="1" opacity="0.2"/>
+
+<!-- Left cluster (extra nodes far left) -->
+<circle cx="320" cy="120" r="7" fill="none" stroke="#06b6d4" stroke-width="1" opacity="0.4"/>
+<circle cx="290" cy="165" r="7" fill="none" stroke="#10b981" stroke-width="1" opacity="0.4"/>
+<circle cx="340" cy="190" r="7" fill="none" stroke="#06b6d4" stroke-width="1" opacity="0.3"/>
+<line x1="320" y1="120" x2="450" y2="145" stroke="#06b6d4" stroke-width="1" opacity="0.15"/>
+<line x1="290" y1="165" x2="450" y2="145" stroke="#06b6d4" stroke-width="1" opacity="0.12"/>
+
+<!-- Right cluster (extra nodes far right) -->
+<circle cx="880" cy="120" r="7" fill="none" stroke="#10b981" stroke-width="1" opacity="0.4"/>
+<circle cx="910" cy="165" r="7" fill="none" stroke="#06b6d4" stroke-width="1" opacity="0.4"/>
+<circle cx="860" cy="190" r="7" fill="none" stroke="#10b981" stroke-width="1" opacity="0.3"/>
+<line x1="880" y1="120" x2="750" y2="145" stroke="#10b981" stroke-width="1" opacity="0.15"/>
+<line x1="910" y1="165" x2="750" y2="145" stroke="#10b981" stroke-width="1" opacity="0.12"/>
+
+<!-- Title -->
+<text x="600" y="273" fill="url(#cg)" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="28" font-weight="700" text-anchor="middle" letter-spacing="4" filter="url(#glow)">SECOND BRAIN OS</text>
+<text x="600" y="292" fill="#64748b" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="11" text-anchor="middle" letter-spacing="1">Persistent memory · Cross-session knowledge · Personal intelligence layer</text>
+
+<!-- Built on SIP footer -->
+<text x="24" y="48" fill="#f59e0b" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="11" opacity="0.8">Built on SIP</text>
+<text x="1176" y="48" fill="#334155" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="10" text-anchor="end" opacity="0.6">v0.2.0</text>
+</svg>
