@@ -52,9 +52,7 @@ pwsh ./scripts/setup.ps1      # Windows
 Then ingest (default `agent` mode — no API key needed):
 
 ```bash
-sbo-ingest path/to/conversations.jsonl \
-  --brain-root /path/to/brain \
-  --private-root /path/to/private
+sbo-ingest path/to/conversations.jsonl --brain-root /path/to/brain --private-root /path/to/private
 ```
 
 Raw lands in `private/`; stubs with `status: needs-summary` land in `brain/_inbox/`. In any coding-agent session, run `/distill-inbox` — the agent walks each stub, reads the linked raw conversation, writes a real summary, sets `status: triage`, and logs to the audit file.
@@ -74,10 +72,7 @@ Full walkthrough: [`docs/getting-started.md`](docs/getting-started.md). One catc
 Smoke-test against the shipped fixture:
 
 ```bash
-sbo-ingest tests/fixtures/claude-ai-export-sample.jsonl \
-  --brain-root /path/to/brain \
-  --private-root /path/to/private \
-  --mode dry-run
+sbo-ingest tests/fixtures/claude-ai-export-sample.jsonl --brain-root /path/to/brain --private-root /path/to/private --mode dry-run
 ```
 
 Running `/distill-inbox` outside Claude Code — in ChatGPT, Cursor, Codex, or Gemini — is covered in [`docs/cross-ai-portability.md`](docs/cross-ai-portability.md).
