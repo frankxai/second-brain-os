@@ -1,31 +1,38 @@
 # Second Brain OS
 
-> A build-in-public AI second-brain template for Obsidian. Two-vault hard privacy separation. Coding-agent-native. Composes the Starlight Intelligence Protocol (SIP).
+**A bootable AI second-brain template for Obsidian, with a hard privacy boundary between what your LLM can read and what it can't.**
+
+Ingest your Claude.ai and ChatGPT exports into a dual-vault Obsidian system: a `brain/` vault your coding agent reads and writes, and an air-gapped `private/` vault no LLM ever touches. The compute that summarizes your conversations is the coding-agent session you already pay for — not an extra API bill.
+
+For builders who want a working second brain on day one and the boundary enforced by the filesystem, not by trust.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Built on SIP](https://img.shields.io/badge/Built%20on-SIP%20v1.1.1-blue.svg)](https://github.com/frankxai/Starlight-Intelligence-System)
 [![Tests](https://github.com/frankxai/second-brain-os/actions/workflows/test.yml/badge.svg)](https://github.com/frankxai/second-brain-os/actions/workflows/test.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 
-**Status:** v0.2.0 — coding-agent-native ingestion.
+**Status:** v0.1.0 — alpha. Ingestion pipeline is tested and CI-green across three OSes and three Python versions; the vault templates and agents are stable; the paid depth-agent layer is documented but lives off-repo.
 
 ---
 
-## What this is
+## The two vaults
 
-A bootable template that gives you a working AI-augmented two-vault Obsidian system. The compute that summarizes your conversations is the coding-agent session you already pay for, not an extra API bill.
+The architecture is one decision repeated everywhere: the LLM can reach `brain/`, and it has no path to `private/`.
 
-- **`brain/` vault** — MCP-wired. Your LLM (Claude Desktop, Claude Code, etc.) reads + writes here. Publishable.
-- **`private/` vault** — air-gapped. No MCP server points here. No LLM has access. Sensitive content lives here permanently.
-- **Dual-write ingestion** — Claude.ai + ChatGPT exports → raw to `private/`, summary stubs to `brain/_inbox/`.
-- **Coding-agent distillation** — `/distill-inbox` in any session (Claude Code, ChatGPT, Cursor, Codex, Gemini) turns stubs into real summaries. No extra API spend.
-- **Audit log** — every ingest + distill event written to `private/_distill/audit.jsonl`. Inspectable, never silent.
-- **Two starter agents** — `people-map` (per-person index) + `pattern-detector` (weekly pattern surfacing).
-- **Paid tier** — 8 depth agents (Big 5, 16P, business-map, decision-history, ikigai, content-engine, …). See [`docs/paid-tier.md`](docs/paid-tier.md).
+| Vault | MCP access | Holds | Publishable |
+|---|---|---|---|
+| `brain/` | Wired (Claude Desktop, Claude Code, …) | Summaries, notes, projects, people, patterns | Yes |
+| `private/` | None — no MCP server points here | Raw conversations, journal, health, finances | No, permanently |
 
-## 30 minutes to wire. Up to 24 hours to first insight.
+Ingestion dual-writes: raw conversation to `private/`, a summary stub to `brain/_inbox/`. The boundary is filesystem, not config. The threat model is in [`docs/privacy-model.md`](docs/privacy-model.md) — read it before ingesting sensitive content.
 
-The Claude.ai data export has a **24-hour delivery window**. You can wire the entire system in 30 minutes, but you can't ingest until the export email arrives. Plan accordingly.
+## How it works
+
+- **Dual-write ingestion** — `sbo-ingest` parses a Claude.ai or ChatGPT export, writes raw to `private/`, stubs to `brain/_inbox/`.
+- **Coding-agent distillation** — `/distill-inbox` in any coding-agent session turns stubs into real summaries by reading the raw conversation in `private/`. No extra API spend.
+- **Audit log** — every ingest and distill event is appended to `private/_distill/audit.jsonl`. Inspectable, never silent.
+- **Two starter agents** — `people-map` (per-person index) and `pattern-detector` (weekly pattern surfacing), shipped as markdown contracts under `_agents/`.
+- **Depth layer (off-repo)** — 8 optional depth agents (Big 5, 16P, business-map, decision-history, ikigai, content-engine, …) are documented in [`docs/paid-tier.md`](docs/paid-tier.md). The OSS template stands alone without them.
 
 ## Quick start
 
@@ -37,82 +44,67 @@ cd second-brain-os
 python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -e .
 
-# Run setup
-pwsh ./scripts/setup.ps1     # Windows
+# Scaffold the vaults
 ./scripts/setup.sh            # macOS / Linux
+pwsh ./scripts/setup.ps1      # Windows
 ```
 
-See [`docs/getting-started.md`](docs/getting-started.md) for the full walkthrough.
-
-## The three modes
-
-`sbo-ingest` has three modes. **Default is `agent` — recommended.**
-
-| Mode | Cost | Compute | When to use |
-|---|---|---|---|
-| `agent` *(default)* | $0 extra | Your coding-agent session | You have Claude Code / ChatGPT / Cursor / Codex / Gemini open. Best quality (agent cross-references your vault). |
-| `api` | ~$0.005/convo on Haiku 4.5 | Anthropic API | Batch automation. No coding-agent session handy. |
-| `dry-run` | $0 | None — stubs only | Smoke-test the install. Verify the dual-write boundary. |
-
-### Default (agent mode) — recommended
+Then ingest (default `agent` mode — no API key needed):
 
 ```bash
 sbo-ingest path/to/conversations.jsonl \
   --brain-root /path/to/brain \
   --private-root /path/to/private
-# Writes raw to private/, stubs (status: needs-summary) to brain/_inbox/
 ```
 
-Then in Claude Code (or any other coding agent — see [`docs/cross-ai-portability.md`](docs/cross-ai-portability.md)):
+Raw lands in `private/`; stubs with `status: needs-summary` land in `brain/_inbox/`. In any coding-agent session, run `/distill-inbox` — the agent walks each stub, reads the linked raw conversation, writes a real summary, sets `status: triage`, and logs to the audit file.
 
-```
-/distill-inbox
-```
+Full walkthrough: [`docs/getting-started.md`](docs/getting-started.md). One catch worth planning around: the Claude.ai data export has a **24-hour delivery window**, so you can wire the system in 30 minutes but can't ingest until the export email arrives.
 
-The agent walks every stub, reads the linked raw conversation in `private/`, produces a real summary, writes it back, updates `status: triage`, and logs to `private/_distill/audit.jsonl`. No extra API spend.
+## The three ingestion modes
 
-### API mode (optional)
+`sbo-ingest` has three modes. Default is `agent`.
 
-```bash
-sbo-ingest path/to/conversations.jsonl \
-  --brain-root /path/to/brain \
-  --private-root /path/to/private \
-  --mode api  # or just set $ANTHROPIC_API_KEY
-```
+| Mode | Cost | Compute | When |
+|---|---|---|---|
+| `agent` *(default)* | $0 extra | Your coding-agent session | You have Claude Code / ChatGPT / Cursor / Codex / Gemini open. Best quality — the agent cross-references your vault. |
+| `api` | ~$0.005/convo on Haiku 4.5 | Anthropic API | Batch automation, or no coding-agent session handy. Set `--mode api` or `$ANTHROPIC_API_KEY`. |
+| `dry-run` | $0 | None — stubs only | Smoke-test the install and verify the dual-write boundary. |
 
-### Smoke-test the install
+Smoke-test against the shipped fixture:
 
 ```bash
 sbo-ingest tests/fixtures/claude-ai-export-sample.jsonl \
   --brain-root /path/to/brain \
   --private-root /path/to/private \
-  --mode dry-run  # legacy --dry-run flag also works
+  --mode dry-run
 ```
 
-## What you get
+Running `/distill-inbox` outside Claude Code — in ChatGPT, Cursor, Codex, or Gemini — is covered in [`docs/cross-ai-portability.md`](docs/cross-ai-portability.md).
+
+## Vault layout
 
 ```
 ~/second-brain/
-├── brain/                 # 10 community plugins, MCP-wired, agent-maintained zones
+├── brain/                 # MCP-wired, agent-maintained
 │   ├── _capture.md
 │   ├── _inbox/{claude-ai,chatgpt,manual}/   # status: needs-summary lives here
 │   ├── notes/{ideas,learnings,decisions}/
 │   ├── projects/
-│   ├── people/            # auto-maintained by people-map agent
-│   ├── patterns/          # weekly pattern-detector output
-│   ├── _meta/             # paid-tier psychometrics, businesses, decisions-history
+│   ├── people/            # maintained by people-map
+│   ├── patterns/          # pattern-detector output
+│   ├── _meta/             # reserved for depth-agent output
 │   ├── _moc/              # Maps of Content
 │   └── _agents/           # agent prompt contracts
-└── private/               # air-gapped, no MCP, no LLM
+└── private/               # air-gapped — no MCP, no LLM
     ├── chat-history/{claude-ai,chatgpt}/    # raw conversations, UUID-named
-    ├── journal/
-    ├── relationships/
-    ├── health/
-    ├── finances/
+    ├── journal/  relationships/  health/  finances/
     └── _distill/
         ├── audit.jsonl    # append-only ingest + distill log
         └── pending/       # private patterns awaiting promotion to brain
 ```
+
+The `brain/` template ships with a 10-plugin Obsidian config (local-rest-api, dataview, templater, smart-connections, tasks, omnisearch, and more — see `templates/brain-vault-skeleton/.obsidian/community-plugins.json`).
 
 ## Docs
 
@@ -123,38 +115,31 @@ sbo-ingest tests/fixtures/claude-ai-export-sample.jsonl \
 | [Privacy Model](docs/privacy-model.md) | Threat model + privacy-hardening checklist |
 | [Architecture](docs/architecture.md) | Three edges, two vaults, agent zones |
 | [Composition Guide](docs/composition-guide.md) | Wiring to SIS / Library OS / Chronicle (optional) |
-| [Paid Tier](docs/paid-tier.md) | 8 depth agents (Big 5, 16P, business-map, …) |
-| [Cross-AI Portability](docs/cross-ai-portability.md) | Running `/distill-inbox` + other commands in ChatGPT / Cursor / Codex / Gemini |
+| [Paid Tier](docs/paid-tier.md) | The 8 depth agents |
+| [Cross-AI Portability](docs/cross-ai-portability.md) | Running `/distill-inbox` in ChatGPT / Cursor / Codex / Gemini |
 
 ## Privacy
 
 > MCP never has a path to `private/`. The boundary is filesystem, not config.
 
-Coding agents that run `/distill-inbox` read `private/` once per conversation (with your explicit consent the moment you invoke the command), produce the summary, and never copy raw content into `brain/`. The audit log records every read.
-
-Read `docs/privacy-model.md` before ingesting sensitive content. Run `scripts/verify-privacy.{ps1,sh}` weekly.
-
-## Composition
-
-SBO is a vertical that composes SIP. It declines canon. The personal-instance pattern symlinks live commands and skills from your other substrates — see `docs/composition-guide.md`. The OSS template stands alone with no external dependencies beyond Python + Obsidian.
-
-(Anthropic API is optional — needed only for `--mode api`.)
+Coding agents that run `/distill-inbox` read `private/` once per conversation — at the moment you invoke the command, with your explicit consent — produce the summary, and never copy raw content into `brain/`. The audit log records every read. Run `scripts/verify-privacy.{sh,ps1}` weekly; CI runs it against the vault skeleton on every push.
 
 ## Testing
 
 ```bash
+pip install -e ".[dev]"
 pytest -v
 ```
 
-37 tests covering: Claude.ai handler (6), ChatGPT handler (4), summarizer with mocked Anthropic (3), voice check (5), dual-write (7), end-to-end ingest including the three modes + audit log (12). CI runs the full matrix on ubuntu / macos / windows × Python 3.11 / 3.12 / 3.13.
+37 tests: Claude.ai handler (6), ChatGPT handler (4), summarizer with mocked Anthropic (3), voice check (5), dual-write (7), end-to-end ingest including the three modes and audit log (12). CI runs the full matrix on ubuntu / macos / windows × Python 3.11 / 3.12 / 3.13.
+
+## Composition
+
+Second Brain OS is a vertical that composes the [Starlight Intelligence Protocol](https://github.com/frankxai/Starlight-Intelligence-System) (v1.1.1) and declines its canon. The OSS template stands alone with no external dependencies beyond Python and Obsidian. The personal-instance pattern can symlink live commands and skills from your other substrates — see [`docs/composition-guide.md`](docs/composition-guide.md). The Anthropic API is optional, needed only for `--mode api`.
 
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
-
-## Built on SIP
-
-Starlight Intelligence Protocol v1.1.1. See [Starlight-Intelligence-System](https://github.com/frankxai/Starlight-Intelligence-System).
 
 ---
 
