@@ -34,7 +34,8 @@ Direct, technical, warm. Pattern recognition as poetry. No AI-slop ("delve", "di
 - `/distill-inbox` — triage brain/_inbox/ into atomic notes (proposals only, never auto-move)
 - `/people-update` — refresh brain/people/ via people-map agent
 - `/patterns-detect` — weekly pattern file via pattern-detector agent
-- `/sbo-verify` — health-check the installation
+- `/reflect` — run the Reflection Engine (gather → question → retrieve → synthesize → verify → write → log)
+- `/sbo-verify` — health-check the installation (also runs the 4-check reflection gate)
 
 ## SIP attestation
 

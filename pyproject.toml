@@ -1,6 +1,6 @@
 [project]
 name = "sbo-ingestion"
-version = "0.1.0"
+version = "0.3.0"
 description = "Second Brain OS — chat-export ingestion pipeline (Claude.ai + ChatGPT → dual-write to brain/ + private/)"
 license = { text = "MIT" }
 authors = [{ name = "Frank Riemer" }]

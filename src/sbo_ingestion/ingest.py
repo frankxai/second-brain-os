@@ -24,9 +24,10 @@ from typing import Literal
 import click
 
 from sbo_ingestion import audit
-from sbo_ingestion.dual_write import DualWriteResult, write_pair
+from sbo_ingestion.dual_write import DualWriteResult, write_index, write_pair
 from sbo_ingestion.handlers import chatgpt as chatgpt_handler
 from sbo_ingestion.handlers import claude_ai as claude_ai_handler
+from sbo_ingestion.handlers import memories as memories_handler
 from sbo_ingestion.summarize import Summary, summarize
 
 
@@ -111,6 +112,16 @@ def _resolve_mode(
     return DEFAULT_MODE
 
 
+def _find_memories(export_path: Path, memories_path: Path | None) -> Path | None:
+    """Resolve the memories.json to ingest: explicit path wins, else auto-detect
+    a ``memories.json`` sibling next to the conversations export. Returns None if
+    neither is present."""
+    if memories_path is not None:
+        return memories_path if memories_path.exists() else None
+    sibling = export_path.parent / "memories.json"
+    return sibling if sibling.exists() else None
+
+
 def ingest(
     export_path: Path,
     *,
@@ -119,6 +130,7 @@ def ingest(
     api_key: str = "",
     mode: Mode | None = None,
     dry_run: bool = False,
+    memories_path: Path | None = None,
 ) -> list[DualWriteResult]:
     """Ingest one export file. Returns list of dual-write results.
 
@@ -127,6 +139,10 @@ def ingest(
       - else ``dry_run=True`` -> "dry-run"
       - else ``api_key`` non-empty -> "api"
       - else default "agent"
+
+    Also emits a newest-first ``_INDEX.md`` corpus map per platform, and — if a
+    ``memories.json`` is given via ``memories_path`` or auto-detected next to the
+    export — a high-signal ``_memory-export.md``.
 
     Writes an entry to ``private_root/_distill/audit.jsonl`` for every
     conversation processed. The audit log lives inside the private vault and
@@ -172,6 +188,17 @@ def ingest(
             brain_root_for_rel=brain_root,
         )
         results.append(result)
+
+    # Corpus map: newest-first {date, title, summary} table per platform.
+    if convos:
+        write_index(convos, brain_root=brain_root, platform=convos[0].platform)
+
+    # High-signal memory export, if the source export shipped a memories.json.
+    found = _find_memories(export_path, memories_path)
+    if found is not None:
+        platform = convos[0].platform if convos else fmt
+        memories_handler.write_memory_export(found, brain_root=brain_root, platform=platform)
+
     return results
 
 
@@ -237,6 +264,14 @@ def _mark_needs_summary(brain_path: Path) -> None:
     default=False,
     help="Legacy alias for --mode dry-run. Kept for back-compat.",
 )
+@click.option(
+    "--memories",
+    "memories_path",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Path to the export's memories.json (the AI's cross-conversation memory). "
+    "If omitted, a memories.json sibling next to EXPORT_PATH is auto-detected.",
+)
 def cli(
     export_path: Path,
     brain_root: Path,
@@ -244,6 +279,7 @@ def cli(
     mode_flag: str | None,
     api_key: str,
     dry_run: bool,
+    memories_path: Path | None,
 ) -> None:
     """Ingest an AI chat export into your SBO vaults."""
     if not brain_root.exists():
@@ -281,6 +317,7 @@ def cli(
         private_root=private_root,
         api_key=api_key,
         mode=effective_mode,
+        memories_path=memories_path,
     )
     click.echo(f"[sbo] wrote {len(results)} conversation pairs")
     for r in results:

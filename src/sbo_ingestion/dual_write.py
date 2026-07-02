@@ -86,9 +86,64 @@ def write_pair(
         status="triage",
         tags=["draft", "needs-triage"],
     )
+    # The export's own per-conversation summary is high-signal: carry it into
+    # frontmatter so agents (and the _INDEX map) can read it without opening the raw file.
+    if convo.summary:
+        brain_post["summary"] = convo.summary
     brain_path.write_text(frontmatter.dumps(brain_post), encoding="utf-8")
 
     return DualWriteResult(private_path=private_path, brain_path=brain_path)
+
+
+def write_index(
+    convos: list[Conversation],
+    *,
+    brain_root: Path,
+    platform: str,
+) -> Path:
+    """Write brain/_inbox/{platform}/_INDEX.md — a newest-first corpus map.
+
+    One row per ingested conversation: {date, title, summary}. This is the
+    cheat-code layer: an agent reads _INDEX.md once and knows the whole corpus
+    without opening every file. Overwrites on each ingest (it's a derived view).
+    """
+    platform_dir = platform.replace(".", "-")  # claude.ai -> claude-ai
+    brain_dir = brain_root / "_inbox" / platform_dir
+    brain_dir.mkdir(parents=True, exist_ok=True)
+    index_path = brain_dir / "_INDEX.md"
+
+    # Newest first, by created_at (fall back to updated_at, then empty sorts last).
+    ordered = sorted(convos, key=lambda c: c.created_at or c.updated_at or "", reverse=True)
+
+    lines: list[str] = [
+        f"# Inbox index — {platform}",
+        "",
+        f"{len(ordered)} conversation(s). Newest first. Derived view, regenerated on ingest.",
+        "",
+        "| Date | Title | Summary |",
+        "| --- | --- | --- |",
+    ]
+    for c in ordered:
+        lines.append(f"| {_date_from(c.created_at)} | {_cell(c.title)} | {_cell(c.summary)} |")
+    lines.append("")
+
+    post = frontmatter.Post(
+        content="\n".join(lines).rstrip() + "\n",
+        source=platform,
+        kind="inbox-index",
+        imported=_now_iso(),
+        conversation_count=len(ordered),
+        tags=["index"],
+    )
+    index_path.write_text(frontmatter.dumps(post), encoding="utf-8")
+    return index_path
+
+
+def _cell(text: str) -> str:
+    """Sanitize a value for a one-line markdown table cell."""
+    if not text:
+        return ""
+    return text.replace("|", "\\|").replace("\r", " ").replace("\n", " ").strip()
 
 
 def _render_brain_body(summary: Summary) -> str:

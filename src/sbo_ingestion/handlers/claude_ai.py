@@ -29,6 +29,7 @@ class Conversation:
     updated_at: str
     messages: tuple[Message, ...]
     platform: str = "claude.ai"
+    summary: str = ""  # per-conversation summary the Claude export carries, when present
 
     def to_raw_markdown(self) -> str:
         """Render this conversation as the raw-vault markdown body (no frontmatter).
@@ -74,4 +75,5 @@ def _parse_conversation(obj: dict) -> Conversation:
         created_at=obj["created_at"],
         updated_at=obj.get("updated_at", obj["created_at"]),
         messages=messages,
+        summary=(obj.get("summary") or "").strip(),
     )

@@ -101,3 +101,35 @@ def test_brain_frontmatter_status_is_triage(tmp_vault_pair: tuple[Path, Path]) -
     post = frontmatter.load(result.brain_path)
     assert post.metadata["status"] == "triage"
     assert "needs-triage" in post.metadata["tags"]
+
+
+def _convo_with_summary() -> Conversation:
+    return Conversation(
+        uuid="sum-1",
+        title="Has an export summary",
+        created_at="2026-05-12T10:00:00Z",
+        updated_at="2026-05-12T10:30:00Z",
+        platform="claude.ai",
+        summary="The export's own one-line summary of this chat.",
+        messages=(
+            Message(uuid="m1", sender="human", text="Hi", created_at="2026-05-12T10:00:00Z"),
+        ),
+    )
+
+
+def test_brain_frontmatter_carries_export_summary(tmp_vault_pair: tuple[Path, Path]) -> None:
+    """When the conversation has an export summary, it lands in brain frontmatter."""
+    brain, private = tmp_vault_pair
+    result = write_pair(
+        _convo_with_summary(), _summary(), brain_root=brain, private_root=private
+    )
+    post = frontmatter.load(result.brain_path)
+    assert post.metadata["summary"] == "The export's own one-line summary of this chat."
+
+
+def test_brain_frontmatter_omits_summary_when_absent(tmp_vault_pair: tuple[Path, Path]) -> None:
+    """No export summary -> no empty `summary:` key polluting frontmatter."""
+    brain, private = tmp_vault_pair
+    result = write_pair(_convo(), _summary(), brain_root=brain, private_root=private)
+    post = frontmatter.load(result.brain_path)
+    assert "summary" not in post.metadata

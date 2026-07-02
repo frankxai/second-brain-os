@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import frontmatter
 
 from sbo_ingestion.ingest import ingest
 from sbo_ingestion.summarize import Summary
@@ -23,9 +26,13 @@ def test_ingest_claude_ai_writes_two_pairs(
     # Both raw files exist in private/
     raw_files = list((private / "chat-history" / "claude-ai").glob("*.md"))
     assert len(raw_files) == 2
-    # Both brain files exist in _inbox/
-    brain_files = list((brain / "_inbox" / "claude-ai").glob("*.md"))
+    # Both brain files exist in _inbox/ (excluding the derived _INDEX.md corpus map)
+    brain_files = [
+        p for p in (brain / "_inbox" / "claude-ai").glob("*.md") if p.name != "_INDEX.md"
+    ]
     assert len(brain_files) == 2
+    # _INDEX.md corpus map is also written, newest-first
+    assert (brain / "_inbox" / "claude-ai" / "_INDEX.md").exists()
 
 
 @patch("sbo_ingestion.ingest.summarize")
@@ -228,3 +235,71 @@ def test_explicit_mode_overrides_legacy_flags(
     )
     sample = result[0].brain_path.read_text(encoding="utf-8")
     assert "/distill-inbox" in sample  # agent-mode sentinel
+
+
+# ---------------------------------------------------------------------------
+# v0.3.0 — corpus index + memory export wiring
+# ---------------------------------------------------------------------------
+
+
+def test_ingest_emits_index(
+    claude_ai_export_path: Path,
+    tmp_vault_pair: tuple[Path, Path],
+) -> None:
+    """Every ingest drops a newest-first _INDEX.md mapping the whole corpus."""
+    brain, private = tmp_vault_pair
+    ingest(claude_ai_export_path, brain_root=brain, private_root=private, mode="agent")
+    index_path = brain / "_inbox" / "claude-ai" / "_INDEX.md"
+    assert index_path.exists()
+    post = frontmatter.load(index_path)
+    assert post.metadata["conversation_count"] == 2
+    # The first fixture conversation carries an export summary — it must show in the map.
+    assert "Two-vault architecture" in post.content
+
+
+def test_ingest_autodetects_sibling_memories(
+    claude_ai_export_path: Path,
+    memories_list_path: Path,
+    tmp_path: Path,
+    tmp_vault_pair: tuple[Path, Path],
+) -> None:
+    """A memories.json sitting next to the export is picked up with no flag."""
+    brain, private = tmp_vault_pair
+    export_dir = tmp_path / "export"
+    export_dir.mkdir()
+    export_copy = export_dir / "conversations.jsonl"
+    shutil.copy(claude_ai_export_path, export_copy)
+    shutil.copy(memories_list_path, export_dir / "memories.json")
+
+    ingest(export_copy, brain_root=brain, private_root=private, mode="agent")
+    mem_path = brain / "_inbox" / "claude-ai" / "_memory-export.md"
+    assert mem_path.exists()
+    assert frontmatter.load(mem_path).metadata["memory_count"] == 3
+
+
+def test_ingest_explicit_memories_path(
+    claude_ai_export_path: Path,
+    memories_dict_path: Path,
+    tmp_vault_pair: tuple[Path, Path],
+) -> None:
+    """An explicit memories_path is honored even with no sibling file."""
+    brain, private = tmp_vault_pair
+    ingest(
+        claude_ai_export_path,
+        brain_root=brain,
+        private_root=private,
+        mode="agent",
+        memories_path=memories_dict_path,
+    )
+    mem_path = brain / "_inbox" / "claude-ai" / "_memory-export.md"
+    assert mem_path.exists()
+
+
+def test_ingest_no_memories_is_fine(
+    claude_ai_export_path: Path,
+    tmp_vault_pair: tuple[Path, Path],
+) -> None:
+    """No memories.json anywhere -> no _memory-export.md, no error."""
+    brain, private = tmp_vault_pair
+    ingest(claude_ai_export_path, brain_root=brain, private_root=private, mode="agent")
+    assert not (brain / "_inbox" / "claude-ai" / "_memory-export.md").exists()
