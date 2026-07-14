@@ -1,0 +1,4550 @@
+diff --git a/.agent-harness.json b/.agent-harness.json
+new file mode 100644
+index 0000000..b826a54
+--- /dev/null
++++ b/.agent-harness.json
+@@ -0,0 +1,45 @@
++﻿{
++    "name":  "second-brain-os",
++    "classification":  "tooling",
++    "owner":  "FrankX AI",
++    "updated":  "2026-06-19",
++    "remote":  "https://github.com/frankxai/second-brain-os.git",
++    "health":  {
++                   "primaryCheck":  "git status",
++                   "manualChecks":  [
++                                        "Review AGENTS.md before edits",
++                                        "Preserve user work and dirty files",
++                                        "Scan public outputs for secrets and private memory"
++                                    ]
++               },
++    "agentGuidance":  {
++                          "readAgentsMd":  true,
++                          "avoidPrivateMemory":  true,
++                          "preserveExistingConventions":  true,
++                          "designTasteKernel":  {
++                                                    "enabled":  true,
++                                                    "root":  "C:\\Users\\frank\\starlight\\repos",
++                                                    "files":  [
++                                                                  "C:\\Users\\frank\\starlight\\repos\\DESIGN_TASTE.md",
++                                                                  "C:\\Users\\frank\\starlight\\repos\\WEB_EXPERIENCE_STANDARD.md",
++                                                                  "C:\\Users\\frank\\starlight\\repos\\MOTION_TASTE_RUBRIC.md",
++                                                                  "C:\\Users\\frank\\starlight\\repos\\MULTI_AGENT_DESIGN_COUNCIL.md",
++                                                                  "C:\\Users\\frank\\starlight\\repos\\VISUAL_QA_GATE.md"
++                                                              ],
++                                                    "appliesTo":  [
++                                                                      "site",
++                                                                      "app",
++                                                                      "landing-page",
++                                                                      "dashboard",
++                                                                      "visual-identity",
++                                                                      "brand",
++                                                                      "motion",
++                                                                      "media",
++                                                                      "social",
++                                                                      "frontend"
++                                                                  ],
++                                                    "motionPlugin":  "motion-design-studio",
++                                                    "visualVerificationRequired":  true
++                                                }
++                      }
++}
+diff --git a/.claude/hooks/README.md b/.claude/hooks/README.md
+new file mode 100644
+index 0000000..d4cd52b
+--- /dev/null
++++ b/.claude/hooks/README.md
+@@ -0,0 +1,19 @@
++# Starlight Central Hooks
++
++This directory is the canonical source for portable hooks shared across Frank's agent harnesses.
++
++Ownership:
++
++- `starlight-agent-config/core/hooks` owns production hook source and projection.
++- `claude-code-hooks/hooks` is an upstream/reference and experiment surface.
++- `claude-code-config/hooks` is legacy during migration and should not be treated as canonical.
++- `~/.claude/hooks`, `~/.grok/hooks`, and future harness hook folders are installed projections.
++
++Rules:
++
++- Keep hooks deterministic, small, and fail-safe.
++- Do not print secrets or private memory.
++- Prefer pass-through behavior when the hook cannot prove a violation.
++- Use `lib/hook-env.sh` for harness and project detection.
++- Validate with `installers/doctor.ps1` and `Starlight-Intelligence-System/scripts/hook-doctor.ps1`.
++
+diff --git a/.claude/hooks/activation-logger.sh b/.claude/hooks/activation-logger.sh
+new file mode 100644
+index 0000000..59df55a
+--- /dev/null
++++ b/.claude/hooks/activation-logger.sh
+@@ -0,0 +1,28 @@
++#!/bin/bash
++# ACOS Activation Logger - Real-time hook activity tracking
++# Logs all hook activations to a rolling activity file
++
++HOOK_NAME="$1"
++EVENT_TYPE="${2:-unknown}"
++LOG_DIR="$HOME/.claude/projects/-mnt-c-Users-Frank-FrankX/logs"
++LOG_FILE="$LOG_DIR/hook-activity.jsonl"
++MAX_LINES=10000  # Rolling log limit
++
++mkdir -p "$LOG_DIR"
++
++# Create activation record
++cat <<EOF >> "$LOG_FILE"
++{"timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","hook":"$HOOK_NAME","event":"$EVENT_TYPE","pwd":"$PWD","session":"$$"}
++EOF
++
++# Roll log if too large
++if [ -f "$LOG_FILE" ]; then
++  LINE_COUNT=$(wc -l < "$LOG_FILE")
++  if [ "$LINE_COUNT" -gt "$MAX_LINES" ]; then
++    tail -n "$MAX_LINES" "$LOG_FILE" > "${LOG_FILE}.tmp"
++    mv "${LOG_FILE}.tmp" "$LOG_FILE"
++  fi
++fi
++
++# Echo visible confirmation (appears in Claude Code output)
++echo "[ACOS] Hook activated: $HOOK_NAME ($EVENT_TYPE)" >&2
+diff --git a/.claude/hooks/audit-trail.sh b/.claude/hooks/audit-trail.sh
+new file mode 100644
+index 0000000..fc97e11
+--- /dev/null
++++ b/.claude/hooks/audit-trail.sh
+@@ -0,0 +1,202 @@
++#!/bin/bash
++# Append-only audit trail (JSONL, python for safety). Sources hook-env when present. Never blocks.
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++source "$SCRIPT_DIR/lib/hook-env.sh" 2>/dev/null || true
++PROJECT_ROOT="${PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}}"
++AUDIT_FILE="$PROJECT_ROOT/.claude-flow/audit.jsonl"
++mkdir -p "$(dirname "$AUDIT_FILE")" 2>/dev/null || true
++
++COMMAND="${1:-help}"
++shift || true
++
++audit_log() {
++  local event_type="$1"; shift
++  local details="$*"
++  python3 -c '
++import json, datetime, os
++entry = {"ts": datetime.datetime.now().isoformat(), "event": "'"$event_type"'", "details": """'"$details"'"""[:500], "session": os.environ.get("CLAUDE_SESSION_ID", os.environ.get("GROK_SESSION", "unknown"))[:20], "pid": os.getpid()}
++print(json.dumps(entry, separators=(",", ":")))
++' >> "$AUDIT_FILE" 2>/dev/null || true
++  return 0
++}
++
++audit_tool() {
++  local tool="$1"
++  local target="$2"
++  local outcome="${3:-ok}"
++
++  python3 -c "
++import json, datetime, os
++entry = {
++    'ts': datetime.datetime.now().isoformat(),
++    'event': 'tool_use',
++    'tool': '$tool',
++    'target': '''$target'''[:200],
++    'outcome': '$outcome',
++    'session': os.environ.get('CLAUDE_SESSION_ID', 'unknown')[:20]
++}
++print(json.dumps(entry, separators=(',', ':')))
++" >> "$AUDIT_FILE" 2>/dev/null
++  return 0
++}
++
++# ── Log IAM violation ─────────────────────────────────────────
++audit_iam_violation() {
++  local profile="$1"
++  local tool="$2"
++  local path="$3"
++  local reason="$4"
++
++  python3 -c "
++import json, datetime, os
++entry = {
++    'ts': datetime.datetime.now().isoformat(),
++    'event': 'iam_violation',
++    'profile': '$profile',
++    'tool': '$tool',
++    'path': '''$path'''[:200],
++    'reason': '$reason',
++    'session': os.environ.get('CLAUDE_SESSION_ID', 'unknown')[:20]
++}
++print(json.dumps(entry, separators=(',', ':')))
++" >> "$AUDIT_FILE" 2>/dev/null
++  return 0
++}
++
++# ── Log gate decision ─────────────────────────────────────────
++audit_gate() {
++  local file="$1"
++  local verdict="$2"
++  local guardians="$3"
++
++  python3 -c "
++import json, datetime, os
++entry = {
++    'ts': datetime.datetime.now().isoformat(),
++    'event': 'gate_decision',
++    'file': '''$file'''[:200],
++    'verdict': '$verdict',
++    'guardians': '$guardians',
++    'session': os.environ.get('CLAUDE_SESSION_ID', 'unknown')[:20]
++}
++print(json.dumps(entry, separators=(',', ':')))
++" >> "$AUDIT_FILE" 2>/dev/null
++  return 0
++}
++
++# ── Log config change ─────────────────────────────────────────
++audit_config_change() {
++  local file="$1"
++  local action="$2"
++  local snapshot_id="$3"
++
++  python3 -c "
++import json, datetime, os
++entry = {
++    'ts': datetime.datetime.now().isoformat(),
++    'event': 'config_change',
++    'file': '''$file'''[:200],
++    'action': '$action',
++    'snapshot': '$snapshot_id',
++    'session': os.environ.get('CLAUDE_SESSION_ID', 'unknown')[:20]
++}
++print(json.dumps(entry, separators=(',', ':')))
++" >> "$AUDIT_FILE" 2>/dev/null
++  return 0
++}
++
++# ── Verify audit integrity ────────────────────────────────────
++verify_audit() {
++  if [ ! -f "$AUDIT_FILE" ]; then
++    echo "No audit file found."
++    exit 0
++  fi
++
++  local total=$(wc -l < "$AUDIT_FILE" 2>/dev/null || echo 0)
++  local valid=0
++  local invalid=0
++
++  while IFS= read -r line; do
++    if python3 -c "import json; json.loads('''$line''')" 2>/dev/null; then
++      valid=$((valid + 1))
++    else
++      invalid=$((invalid + 1))
++    fi
++  done < "$AUDIT_FILE"
++
++  echo "Audit trail integrity check:"
++  echo "  Total entries: $total"
++  echo "  Valid JSON:    $valid"
++  echo "  Invalid:       $invalid"
++
++  if [ "$invalid" -gt 0 ]; then
++    echo "  WARNING: $invalid corrupted entries detected"
++    exit 1
++  fi
++  echo "  Status: CLEAN"
++  exit 0
++}
++
++# ── View recent entries ───────────────────────────────────────
++tail_audit() {
++  local count="${1:-20}"
++  if [ ! -f "$AUDIT_FILE" ]; then
++    echo "No audit trail yet."
++    exit 0
++  fi
++
++  echo "=== ACOS Audit Trail — Last $count entries ==="
++  tail -n "$count" "$AUDIT_FILE" | python3 -c "
++import json, sys
++for line in sys.stdin:
++    line = line.strip()
++    if not line: continue
++    try:
++        e = json.loads(line)
++        ts = e.get('ts', '')[:19]
++        event = e.get('event', 'unknown')
++        if event == 'tool_use':
++            print(f'  {ts} | {event:15} | {e.get(\"tool\",\"\")} → {e.get(\"target\",\"\")[:40]} [{e.get(\"outcome\",\"\")}]')
++        elif event == 'iam_violation':
++            print(f'  {ts} | {event:15} | {e.get(\"profile\",\"\")} denied {e.get(\"tool\",\"\")} on {e.get(\"path\",\"\")[:30]}')
++        elif event == 'gate_decision':
++            print(f'  {ts} | {event:15} | {e.get(\"file\",\"\")[:30]} → {e.get(\"verdict\",\"\")}')
++        elif event == 'config_change':
++            print(f'  {ts} | {event:15} | {e.get(\"file\",\"\")[:30]} [{e.get(\"action\",\"\")}] snap={e.get(\"snapshot\",\"\")}')
++        else:
++            detail = e.get('details', '')[:50]
++            print(f'  {ts} | {event:15} | {detail}')
++    except:
++        continue
++" 2>/dev/null
++  echo ""
++  local total=$(wc -l < "$AUDIT_FILE" 2>/dev/null || echo 0)
++  echo "Total entries: $total"
++}
++
++# ── Main ──────────────────────────────────────────────────────
++case "$COMMAND" in
++  "log")       audit_log "$@" ;;
++  "tool")      audit_tool "$@" ;;
++  "iam")       audit_iam_violation "$@" ;;
++  "gate")      audit_gate "$@" ;;
++  "config")    audit_config_change "$@" ;;
++  "verify")    verify_audit ;;
++  "tail"|"show") tail_audit "$@" ;;
++  "help"|"-h"|"--help")
++    echo "ACOS v10 Immutable Audit Trail"
++    echo ""
++    echo "Commands:"
++    echo "  log <type> <details>        Append generic event"
++    echo "  tool <tool> <target> [ok]   Log tool use"
++    echo "  iam <profile> <tool> <path> Log IAM violation"
++    echo "  gate <file> <verdict> <g>   Log gate decision"
++    echo "  config <file> <action> <id> Log config change"
++    echo "  verify                      Check integrity"
++    echo "  tail [count]                View recent entries"
++    ;;
++  *)
++    # If called with unknown command, treat as generic log
++    audit_log "$COMMAND" "$*"
++    ;;
++esac
+diff --git a/.claude/hooks/circuit-breaker.sh b/.claude/hooks/circuit-breaker.sh
+new file mode 100644
+index 0000000..36ee66e
+--- /dev/null
++++ b/.claude/hooks/circuit-breaker.sh
+@@ -0,0 +1,136 @@
++#!/bin/bash
++# Portable circuit breaker (thresholds 3/5/8). Sources hook-env when present.
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++source "$SCRIPT_DIR/lib/hook-env.sh" 2>/dev/null || true
++PROJECT_ROOT="${PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}}"
++BREAKER_DIR="$PROJECT_ROOT/.claude-flow/circuit-breaker"
++mkdir -p "$BREAKER_DIR" 2>/dev/null || true
++
++COMMAND="${1:-help}"
++shift || true
++
++WARN_THRESHOLD=3
++RESTRICT_THRESHOLD=5
++BREAK_THRESHOLD=8
++
++path_to_key() {
++  echo "$1" | sed 's/[^a-zA-Z0-9._-]/_/g'
++}
++
++# ── Record a failure ──────────────────────────────────────────
++record_failure() {
++  local file="$1"
++  local tool="${2:-unknown}"
++  local key=$(path_to_key "$file")
++  local counter_file="$BREAKER_DIR/$key"
++
++  # Read current count
++  local count=0
++  if [ -f "$counter_file" ]; then
++    count=$(cat "$counter_file" 2>/dev/null || echo 0)
++  fi
++  count=$((count + 1))
++
++  # Write new count
++  echo "$count" > "$counter_file"
++
++  # Log to audit trail
++  [ -x "$AUDIT_SCRIPT" ] && bash "$AUDIT_SCRIPT" log "circuit_breaker_record" "file=$file tool=$tool failures=$count" 2>/dev/null &
++
++  # Output based on threshold
++  if [ "$count" -ge "$BREAK_THRESHOLD" ]; then
++    echo "[Circuit Breaker] BREAK: $count failures on $(basename "$file"). STOP editing this file and try a completely different approach."
++  elif [ "$count" -ge "$RESTRICT_THRESHOLD" ]; then
++    echo "[Circuit Breaker] RESTRICT: $count failures on $(basename "$file"). Strongly recommend skipping this file or seeking user input."
++  elif [ "$count" -ge "$WARN_THRESHOLD" ]; then
++    echo "[Circuit Breaker] WARN: $count failures on $(basename "$file"). Consider a different approach — read the file again, check types, or simplify."
++  fi
++}
++
++# ── Check file status before edit ─────────────────────────────
++check_file() {
++  local file="$1"
++  local key=$(path_to_key "$file")
++  local counter_file="$BREAKER_DIR/$key"
++
++  if [ ! -f "$counter_file" ]; then
++    exit 0
++  fi
++
++  local count=$(cat "$counter_file" 2>/dev/null || echo 0)
++
++  if [ "$count" -ge "$BREAK_THRESHOLD" ]; then
++    echo "[Circuit Breaker] BLOCKED: $(basename "$file") has $count consecutive failures. This file is circuit-broken."
++    echo "Recommended: Ask user for guidance or try a completely different approach."
++    # When enforcement is on, actually block the edit
++    if [ "${ACOS_GATE_ENFORCE:-false}" = "true" ]; then
++      exit 2
++    fi
++  elif [ "$count" -ge "$RESTRICT_THRESHOLD" ]; then
++    echo "[Circuit Breaker] WARNING: $(basename "$file") has $count failures. Proceed with caution."
++  elif [ "$count" -ge "$WARN_THRESHOLD" ]; then
++    echo "[Circuit Breaker] Note: $(basename "$file") has had $count recent failures."
++  fi
++
++  exit 0
++}
++
++# ── Record a success (resets counter) ─────────────────────────
++record_success() {
++  local file="$1"
++  local key=$(path_to_key "$file")
++  local counter_file="$BREAKER_DIR/$key"
++
++  if [ -f "$counter_file" ]; then
++    rm -f "$counter_file" 2>/dev/null
++  fi
++}
++
++# ── Reset all counters (session end) ──────────────────────────
++reset_all() {
++  local count=$(find "$BREAKER_DIR" -type f 2>/dev/null | wc -l)
++  rm -f "$BREAKER_DIR"/* 2>/dev/null || true
++  echo "[Circuit Breaker] Reset $count file counters."
++}
++
++# ── Status report ─────────────────────────────────────────────
++status_report() {
++  echo "=== Circuit Breaker Status ==="
++  local any=false
++  for f in "$BREAKER_DIR"/*; do
++    [ -f "$f" ] || continue
++    any=true
++    local count=$(cat "$f" 2>/dev/null || echo 0)
++    local name=$(basename "$f")
++    local level="ok"
++    [ "$count" -ge "$WARN_THRESHOLD" ] && level="WARN"
++    [ "$count" -ge "$RESTRICT_THRESHOLD" ] && level="RESTRICT"
++    [ "$count" -ge "$BREAK_THRESHOLD" ] && level="BREAK"
++    echo "  $name: $count failures [$level]"
++  done
++  if [ "$any" = false ]; then
++    echo "  All clear — no failure counters active."
++  fi
++}
++
++# ── Main ──────────────────────────────────────────────────────
++case "$COMMAND" in
++  "record"|"fail")    record_failure "$@" ;;
++  "check")            check_file "$@" ;;
++  "success"|"ok")     record_success "$@" ;;
++  "reset")            reset_all ;;
++  "status")           status_report ;;
++  "help"|"-h"|"--help")
++    echo "ACOS v10 Confidence Circuit Breaker"
++    echo ""
++    echo "Commands:"
++    echo "  record <file> [tool]  Record a failure on file"
++    echo "  check <file>          Check if file is circuit-broken"
++    echo "  success <file>        Reset counter on success"
++    echo "  reset                 Clear all counters"
++    echo "  status                Show all active counters"
++    echo ""
++    echo "Thresholds: WARN=$WARN_THRESHOLD, RESTRICT=$RESTRICT_THRESHOLD, BREAK=$BREAK_THRESHOLD"
++    ;;
++  *) echo "Unknown command: $COMMAND" >&2; exit 1 ;;
++esac
+diff --git a/.claude/hooks/context-budget-tracker.ts b/.claude/hooks/context-budget-tracker.ts
+new file mode 100644
+index 0000000..a6c50cc
+--- /dev/null
++++ b/.claude/hooks/context-budget-tracker.ts
+@@ -0,0 +1,192 @@
++#!/usr/bin/env npx tsx
++/**
++ * ACOS v6.1 Context Budget Tracker
++ *
++ * Source: claude-flow v3 context engineering patterns
++ * Implements: Quality curve monitoring, budget enforcement, anti-drift detection
++ *
++ * Tracks context usage and warns when approaching limits
++ */
++
++import * as fs from 'fs';
++import * as path from 'path';
++
++// Context budget configuration (from claude-flow patterns)
++const BUDGET_CONFIG = {
++  // Quality curve thresholds
++  quality_curve: {
++    peak: { min: 0, max: 30 },        // 0-30% = peak quality
++    good: { min: 30, max: 50 },       // 30-50% = good quality
++    degrading: { min: 50, max: 70 },  // 50-70% = quality degrading
++    refresh_trigger: 70               // 70%+ = trigger context refresh
++  },
++
++  // Budget allocation
++  per_agent_budget: 0.3,              // 30% max per agent
++  shared_memory_budget: 0.2,          // 20% for shared context
++  total_session_limit: 0.7,           // 70% before warning
++
++  // Anti-drift checkpoints
++  checkpoints: [
++    'after_research',
++    'after_first_draft',
++    'every_500_words',
++    'before_publish'
++  ]
++};
++
++// State file for tracking across calls
++const STATE_FILE = path.join(process.env.HOME || '', '.claude', 'acos', 'context-state.json');
++
++interface ContextState {
++  session_id: string;
++  start_time: number;
++  tool_calls: number;
++  estimated_tokens: number;
++  checkpoints_hit: string[];
++  last_checkpoint: string | null;
++  drift_warnings: number;
++  quality_phase: 'peak' | 'good' | 'degrading' | 'refresh';
++}
++
++function loadState(): ContextState {
++  try {
++    if (fs.existsSync(STATE_FILE)) {
++      return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
++    }
++  } catch (e) {
++    // Ignore errors, return fresh state
++  }
++
++  return {
++    session_id: Date.now().toString(),
++    start_time: Date.now(),
++    tool_calls: 0,
++    estimated_tokens: 0,
++    checkpoints_hit: [],
++    last_checkpoint: null,
++    drift_warnings: 0,
++    quality_phase: 'peak'
++  };
++}
++
++function saveState(state: ContextState): void {
++  try {
++    const dir = path.dirname(STATE_FILE);
++    if (!fs.existsSync(dir)) {
++      fs.mkdirSync(dir, { recursive: true });
++    }
++    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
++  } catch (e) {
++    // Ignore errors
++  }
++}
++
++function estimateTokens(toolName: string, inputSize: number): number {
++  // Rough token estimates by tool type
++  const toolMultipliers: Record<string, number> = {
++    'Read': 0.5,      // File content
++    'Write': 0.3,     // Output only
++    'Edit': 0.2,      // Small changes
++    'Bash': 0.4,      // Command output
++    'Task': 1.5,      // Subagent context
++    'Grep': 0.3,      // Search results
++    'Glob': 0.1,      // File lists
++    'WebFetch': 1.0,  // Web content
++    'WebSearch': 0.5, // Search results
++  };
++
++  const multiplier = toolMultipliers[toolName] || 0.5;
++  return Math.round(inputSize * multiplier / 4); // Rough char-to-token ratio
++}
++
++function determineQualityPhase(usagePercent: number): ContextState['quality_phase'] {
++  const { quality_curve } = BUDGET_CONFIG;
++
++  if (usagePercent < quality_curve.peak.max) return 'peak';
++  if (usagePercent < quality_curve.good.max) return 'good';
++  if (usagePercent < quality_curve.degrading.max) return 'degrading';
++  return 'refresh';
++}
++
++function checkForDrift(state: ContextState, currentTask: string): boolean {
++  // Simple drift detection: if we've been working for a while without checkpoints
++  const timeSinceStart = Date.now() - state.start_time;
++  const minutesElapsed = timeSinceStart / (1000 * 60);
++
++  // Warning signs of drift:
++  // 1. More than 20 tool calls without checkpoint
++  // 2. More than 15 minutes without checkpoint
++  // 3. Quality phase is degrading or refresh
++
++  if (state.tool_calls > 20 && state.checkpoints_hit.length === 0) {
++    return true;
++  }
++
++  if (minutesElapsed > 15 && state.checkpoints_hit.length === 0) {
++    return true;
++  }
++
++  if (state.quality_phase === 'degrading' || state.quality_phase === 'refresh') {
++    return true;
++  }
++
++  return false;
++}
++
++function formatOutput(state: ContextState, driftDetected: boolean): string {
++  const lines: string[] = [];
++
++  // Quality phase indicator
++  const phaseEmoji = {
++    peak: '',
++    good: '',
++    degrading: '',
++    refresh: ''
++  };
++
++  lines.push(`Context checkpoint: ${phaseEmoji[state.quality_phase]} Quality phase: ${state.quality_phase.toUpperCase()}`);
++
++  if (state.quality_phase === 'degrading') {
++    lines.push('Context quality degrading. Consider summarizing progress.');
++  }
++
++  if (state.quality_phase === 'refresh') {
++    lines.push('REFRESH RECOMMENDED: Context at limit. Spawn fresh context or /clear.');
++  }
++
++  if (driftDetected) {
++    lines.push('DRIFT WARNING: Task may be diverging. Review original goal.');
++    state.drift_warnings++;
++  }
++
++  return lines.join('\n');
++}
++
++async function main() {
++  // Get tool info from environment (set by Claude Code hooks)
++  const toolName = process.env.TOOL_NAME || 'unknown';
++  const toolInput = process.env.TOOL_INPUT || '';
++
++  // Load state
++  const state = loadState();
++
++  // Update state
++  state.tool_calls++;
++  state.estimated_tokens += estimateTokens(toolName, toolInput.length);
++
++  // Estimate usage percent (assume 100k context window)
++  const usagePercent = (state.estimated_tokens / 100000) * 100;
++  state.quality_phase = determineQualityPhase(usagePercent);
++
++  // Check for drift
++  const driftDetected = checkForDrift(state, toolInput);
++
++  // Save state
++  saveState(state);
++
++  // Output
++  console.log(formatOutput(state, driftDetected));
++}
++
++main().catch(console.error);
+diff --git a/.claude/hooks/excellence-hook.sh b/.claude/hooks/excellence-hook.sh
+new file mode 100644
+index 0000000..77c70b6
+--- /dev/null
++++ b/.claude/hooks/excellence-hook.sh
+@@ -0,0 +1,18 @@
++#!/bin/bash
++# excellence-hook.sh
++# Minimal excellence wiring (god 99). Sources hook-env.
++# For any hook activation, remind/apply Frank DNA + gates.
++# Use gstack for UI QA if relevant (delegates to skill).
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++source "$SCRIPT_DIR/lib/hook-env.sh" 2>/dev/null || true
++
++HOOK_NAME="${1:-hook}"
++EVENT="${2:-event}"
++
++echo "[excellence] ${HOOK_NAME}@${EVENT} harness=${HARNESS} project=${PROJECT_NAME} | Embody Frank DNA. Read CLAUDE.md/AGENTS.md. Gate via verification/santa/qa/cso. gstack for UI."
++
++# Non-blocking: if gstack skill available in context, it can be suggested by excellence-review
++# Actual UI verification would invoke via subagent or terminal: gstack ...
++
++exit 0
+diff --git a/.claude/hooks/file-link-tracker.sh b/.claude/hooks/file-link-tracker.sh
+new file mode 100644
+index 0000000..2281c4a
+--- /dev/null
++++ b/.claude/hooks/file-link-tracker.sh
+@@ -0,0 +1,106 @@
++#!/bin/bash
++# file-link-tracker.sh
++# Portable File Link Tracker — PostToolUse (and equiv for other harnesses)
++# Sources hook-env for agnostic paths/harness. No WSL/FrankX hardcodes in logic.
++# Appends every created/edited file path to ~/LINKS_TODAY.md (or portable equiv)
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++source "$SCRIPT_DIR/lib/hook-env.sh" 2>/dev/null || true
++
++# Support stdin json or env (claude sets TOOL_* via some wrappers; also read json)
++INPUT_JSON=""
++if [ -t 0 ]; then
++  : # no stdin
++else
++  INPUT_JSON=$(cat 2>/dev/null || true)
++fi
++
++FILE_PATH="${TOOL_INPUT_file_path:-}"
++TOOL="${TOOL_NAME:-unknown}"
++
++# If json input, parse key fields portably (simple grep/awk for no jq dep)
++if [ -n "$INPUT_JSON" ] && [ -z "$FILE_PATH" ]; then
++  FILE_PATH=$(echo "$INPUT_JSON" | grep -o '"file_path":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
++  [ -z "$FILE_PATH" ] && FILE_PATH=$(echo "$INPUT_JSON" | grep -o '"path":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
++fi
++if [ -n "$INPUT_JSON" ] && [ "$TOOL" = "unknown" ]; then
++  TOOL=$(echo "$INPUT_JSON" | grep -o '"tool_name":"[^"]*"' | head -1 | cut -d'"' -f4 || echo "PostToolUse")
++fi
++
++TIMESTAMP=$(date +"%H:%M")
++TODAY=$(date +"%Y-%m-%d")
++LOG="${HOME}/LINKS_TODAY.md"  # portable, user can symlink or override
++
++# Only track actual file paths
++[[ -z "$FILE_PATH" ]] && exit 0
++[[ "$FILE_PATH" == "null" ]] && exit 0
++
++# Initialize log if new day (portable date)
++if [[ -f "$LOG" ]]; then
++  LAST_DATE=$(head -3 "$LOG" 2>/dev/null | grep "^# " | head -1 | awk '{print $2}')
++  if [[ "$LAST_DATE" != "$TODAY" ]]; then
++    ARCHIVE="${HOME}/LINKS_$(date -d yesterday +%Y-%m-%d 2>/dev/null || date -v-1d +%Y-%m-%d 2>/dev/null || echo prev).md"
++    mv "$LOG" "$ARCHIVE" 2>/dev/null || true
++  fi
++fi
++
++# Create header if file doesn't exist
++if [[ ! -f "$LOG" ]]; then
++  cat > "$LOG" << EOF
++# Files Created/Modified — $TODAY
++
++> Run: \`cat ~/LINKS_TODAY.md\` or \`glow ~/LINKS_TODAY.md\`
++> Harness: ${HARNESS:-unknown} | Project: ${PROJECT_NAME:-?}
++> Cross-machine sync as needed.
++
++EOF
++fi
++
++# Detect type
++EXT="${FILE_PATH##*.}"
++case "$EXT" in
++  md|mdx)   ICON="📝" ;;
++  ts|tsx|js|jsx) ICON="💻" ;;
++  png|jpg|jpeg|webp) ICON="🖼️" ;;
++  sh|bash)  ICON="⚙️" ;;
++  json)     ICON="📦" ;;
++  *)        ICON="📄" ;;
++esac
++
++# GitHub URL via git remote (portable, no personal hardcodes)
++GITHUB_URL=""
++if command -v git >/dev/null 2>&1 && git -C "$(dirname "$FILE_PATH")" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
++  REMOTE=$(git -C "$(dirname "$FILE_PATH")" remote get-url origin 2>/dev/null || true)
++  BRANCH=$(git -C "$(dirname "$FILE_PATH")" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
++  if [[ "$REMOTE" == *github.com* ]]; then
++    REPO=$(echo "$REMOTE" | sed -E 's#.*github.com[:/]([^/]+/[^/.]+).*#\1#')
++    REL=$(git -C "$(dirname "$FILE_PATH")" ls-files --full-name -- "$(basename "$FILE_PATH")" 2>/dev/null || basename "$FILE_PATH")
++    GITHUB_URL="https://github.com/$REPO/blob/$BRANCH/$REL"
++  fi
++fi
++
++# Append entry
++if [[ -n "$GITHUB_URL" ]]; then
++  echo "- $ICON \`$TIMESTAMP\` [$TOOL] [$FILE_PATH]($GITHUB_URL)" >> "$LOG"
++else
++  echo "- $ICON \`$TIMESTAMP\` [$TOOL] \`$FILE_PATH\`" >> "$LOG"
++fi
++
++# Auto-open review-worthy (WSL only, portable)
++if command -v wslpath >/dev/null 2>&1; then
++  WIN_PATH=$(wslpath -w "$FILE_PATH" 2>/dev/null || true)
++  if [[ -n "$WIN_PATH" ]]; then
++    case "$EXT" in
++      md|mdx)
++        cmd.exe /c start "" "$WIN_PATH" 2>/dev/null &
++        ;;
++      png|jpg|jpeg|webp)
++        cmd.exe /c start "" "$WIN_PATH" 2>/dev/null &
++        ;;
++    esac
++  fi
++fi
++
++log_hook_activation "file-link-tracker" "PostToolUse" 2>/dev/null || true
++
++exit 0
+diff --git a/.claude/hooks/gsd-context-monitor.js b/.claude/hooks/gsd-context-monitor.js
+new file mode 100644
+index 0000000..ae1bbf9
+--- /dev/null
++++ b/.claude/hooks/gsd-context-monitor.js
+@@ -0,0 +1,156 @@
++#!/usr/bin/env node
++// gsd-hook-version: {{GSD_VERSION}}
++// Context Monitor - PostToolUse/AfterTool hook (Gemini uses AfterTool)
++// Reads context metrics from the statusline bridge file and injects
++// warnings when context usage is high. This makes the AGENT aware of
++// context limits (the statusline only shows the user).
++//
++// How it works:
++// 1. The statusline hook writes metrics to /tmp/claude-ctx-{session_id}.json
++// 2. This hook reads those metrics after each tool use
++// 3. When remaining context drops below thresholds, it injects a warning
++//    as additionalContext, which the agent sees in its conversation
++//
++// Thresholds:
++//   WARNING  (remaining <= 35%): Agent should wrap up current task
++//   CRITICAL (remaining <= 25%): Agent should stop immediately and save state
++//
++// Debounce: 5 tool uses between warnings to avoid spam
++// Severity escalation bypasses debounce (WARNING -> CRITICAL fires immediately)
++
++const fs = require('fs');
++const os = require('os');
++const path = require('path');
++
++const WARNING_THRESHOLD = 35;  // remaining_percentage <= 35%
++const CRITICAL_THRESHOLD = 25; // remaining_percentage <= 25%
++const STALE_SECONDS = 60;      // ignore metrics older than 60s
++const DEBOUNCE_CALLS = 5;      // min tool uses between warnings
++
++let input = '';
++// Timeout guard: if stdin doesn't close within 10s (e.g. pipe issues on
++// Windows/Git Bash, or slow Claude Code piping during large outputs),
++// exit silently instead of hanging until Claude Code kills the process
++// and reports "hook error". See #775, #1162.
++const stdinTimeout = setTimeout(() => process.exit(0), 10000);
++process.stdin.setEncoding('utf8');
++process.stdin.on('data', chunk => input += chunk);
++process.stdin.on('end', () => {
++  clearTimeout(stdinTimeout);
++  try {
++    const data = JSON.parse(input);
++    const sessionId = data.session_id;
++
++    if (!sessionId) {
++      process.exit(0);
++    }
++
++    // Check if context warnings are disabled via config
++    const cwd = data.cwd || process.cwd();
++    const configPath = path.join(cwd, '.planning', 'config.json');
++    if (fs.existsSync(configPath)) {
++      try {
++        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
++        if (config.hooks?.context_warnings === false) {
++          process.exit(0);
++        }
++      } catch (e) {
++        // Ignore config parse errors
++      }
++    }
++
++    const tmpDir = os.tmpdir();
++    const metricsPath = path.join(tmpDir, `claude-ctx-${sessionId}.json`);
++
++    // If no metrics file, this is a subagent or fresh session -- exit silently
++    if (!fs.existsSync(metricsPath)) {
++      process.exit(0);
++    }
++
++    const metrics = JSON.parse(fs.readFileSync(metricsPath, 'utf8'));
++    const now = Math.floor(Date.now() / 1000);
++
++    // Ignore stale metrics
++    if (metrics.timestamp && (now - metrics.timestamp) > STALE_SECONDS) {
++      process.exit(0);
++    }
++
++    const remaining = metrics.remaining_percentage;
++    const usedPct = metrics.used_pct;
++
++    // No warning needed
++    if (remaining > WARNING_THRESHOLD) {
++      process.exit(0);
++    }
++
++    // Debounce: check if we warned recently
++    const warnPath = path.join(tmpDir, `claude-ctx-${sessionId}-warned.json`);
++    let warnData = { callsSinceWarn: 0, lastLevel: null };
++    let firstWarn = true;
++
++    if (fs.existsSync(warnPath)) {
++      try {
++        warnData = JSON.parse(fs.readFileSync(warnPath, 'utf8'));
++        firstWarn = false;
++      } catch (e) {
++        // Corrupted file, reset
++      }
++    }
++
++    warnData.callsSinceWarn = (warnData.callsSinceWarn || 0) + 1;
++
++    const isCritical = remaining <= CRITICAL_THRESHOLD;
++    const currentLevel = isCritical ? 'critical' : 'warning';
++
++    // Emit immediately on first warning, then debounce subsequent ones
++    // Severity escalation (WARNING -> CRITICAL) bypasses debounce
++    const severityEscalated = currentLevel === 'critical' && warnData.lastLevel === 'warning';
++    if (!firstWarn && warnData.callsSinceWarn < DEBOUNCE_CALLS && !severityEscalated) {
++      // Update counter and exit without warning
++      fs.writeFileSync(warnPath, JSON.stringify(warnData));
++      process.exit(0);
++    }
++
++    // Reset debounce counter
++    warnData.callsSinceWarn = 0;
++    warnData.lastLevel = currentLevel;
++    fs.writeFileSync(warnPath, JSON.stringify(warnData));
++
++    // Detect if GSD is active (has .planning/STATE.md in working directory)
++    const isGsdActive = fs.existsSync(path.join(cwd, '.planning', 'STATE.md'));
++
++    // Build advisory warning message (never use imperative commands that
++    // override user preferences — see #884)
++    let message;
++    if (isCritical) {
++      message = isGsdActive
++        ? `CONTEXT CRITICAL: Usage at ${usedPct}%. Remaining: ${remaining}%. ` +
++          'Context is nearly exhausted. Do NOT start new complex work or write handoff files — ' +
++          'GSD state is already tracked in STATE.md. Inform the user so they can run ' +
++          '/gsd:pause-work at the next natural stopping point.'
++        : `CONTEXT CRITICAL: Usage at ${usedPct}%. Remaining: ${remaining}%. ` +
++          'Context is nearly exhausted. Inform the user that context is low and ask how they ' +
++          'want to proceed. Do NOT autonomously save state or write handoff files unless the user asks.';
++    } else {
++      message = isGsdActive
++        ? `CONTEXT WARNING: Usage at ${usedPct}%. Remaining: ${remaining}%. ` +
++          'Context is getting limited. Avoid starting new complex work. If not between ' +
++          'defined plan steps, inform the user so they can prepare to pause.'
++        : `CONTEXT WARNING: Usage at ${usedPct}%. Remaining: ${remaining}%. ` +
++          'Be aware that context is getting limited. Avoid unnecessary exploration or ' +
++          'starting new complex work.';
++    }
++
++    const output = {
++      hookSpecificOutput: {
++        hookEventName: process.env.GEMINI_API_KEY ? "AfterTool" : "PostToolUse",
++        additionalContext: message
++      }
++    };
++
++    process.stdout.write(JSON.stringify(output));
++  } catch (e) {
++    // Silent fail -- never block tool execution
++    process.exit(0);
++  }
++});
+diff --git a/.claude/hooks/gsd-context-monitor.sh b/.claude/hooks/gsd-context-monitor.sh
+new file mode 100644
+index 0000000..347d10d
+--- /dev/null
++++ b/.claude/hooks/gsd-context-monitor.sh
+@@ -0,0 +1,7 @@
++#!/bin/bash
++# gsd-context-monitor.sh
++# Shim for ACOS gsd-context-monitor.js (ported)
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++source "$SCRIPT_DIR/lib/hook-env.sh" 2>/dev/null || true
++log_hook_activation "gsd-context-monitor" "PostToolUse" 2>/dev/null || true
++if [ -f "$SCRIPT_DIR/gsd-context-monitor.js" ]; then cat | node "$SCRIPT_DIR/gsd-context-monitor.js"; else cat; fi
+diff --git a/.claude/hooks/gsd-statusline.js b/.claude/hooks/gsd-statusline.js
+new file mode 100644
+index 0000000..ae7025b
+--- /dev/null
++++ b/.claude/hooks/gsd-statusline.js
+@@ -0,0 +1,119 @@
++#!/usr/bin/env node
++// gsd-hook-version: {{GSD_VERSION}}
++// Claude Code Statusline - GSD Edition
++// Shows: model | current task | directory | context usage
++
++const fs = require('fs');
++const path = require('path');
++const os = require('os');
++
++// Read JSON from stdin
++let input = '';
++// Timeout guard: if stdin doesn't close within 3s (e.g. pipe issues on
++// Windows/Git Bash), exit silently instead of hanging. See #775.
++const stdinTimeout = setTimeout(() => process.exit(0), 3000);
++process.stdin.setEncoding('utf8');
++process.stdin.on('data', chunk => input += chunk);
++process.stdin.on('end', () => {
++  clearTimeout(stdinTimeout);
++  try {
++    const data = JSON.parse(input);
++    const model = data.model?.display_name || 'Claude';
++    const dir = data.workspace?.current_dir || process.cwd();
++    const session = data.session_id || '';
++    const remaining = data.context_window?.remaining_percentage;
++
++    // Context window display (shows USED percentage scaled to usable context)
++    // Claude Code reserves ~16.5% for autocompact buffer, so usable context
++    // is 83.5% of the total window. We normalize to show 100% at that point.
++    const AUTO_COMPACT_BUFFER_PCT = 16.5;
++    let ctx = '';
++    if (remaining != null) {
++      // Normalize: subtract buffer from remaining, scale to usable range
++      const usableRemaining = Math.max(0, ((remaining - AUTO_COMPACT_BUFFER_PCT) / (100 - AUTO_COMPACT_BUFFER_PCT)) * 100);
++      const used = Math.max(0, Math.min(100, Math.round(100 - usableRemaining)));
++
++      // Write context metrics to bridge file for the context-monitor PostToolUse hook.
++      // The monitor reads this file to inject agent-facing warnings when context is low.
++      if (session) {
++        try {
++          const bridgePath = path.join(os.tmpdir(), `claude-ctx-${session}.json`);
++          const bridgeData = JSON.stringify({
++            session_id: session,
++            remaining_percentage: remaining,
++            used_pct: used,
++            timestamp: Math.floor(Date.now() / 1000)
++          });
++          fs.writeFileSync(bridgePath, bridgeData);
++        } catch (e) {
++          // Silent fail -- bridge is best-effort, don't break statusline
++        }
++      }
++
++      // Build progress bar (10 segments)
++      const filled = Math.floor(used / 10);
++      const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
++
++      // Color based on usable context thresholds
++      if (used < 50) {
++        ctx = ` \x1b[32m${bar} ${used}%\x1b[0m`;
++      } else if (used < 65) {
++        ctx = ` \x1b[33m${bar} ${used}%\x1b[0m`;
++      } else if (used < 80) {
++        ctx = ` \x1b[38;5;208m${bar} ${used}%\x1b[0m`;
++      } else {
++        ctx = ` \x1b[5;31m💀 ${bar} ${used}%\x1b[0m`;
++      }
++    }
++
++    // Current task from todos
++    let task = '';
++    const homeDir = os.homedir();
++    // Respect CLAUDE_CONFIG_DIR for custom config directory setups (#870)
++    const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(homeDir, '.claude');
++    const todosDir = path.join(claudeDir, 'todos');
++    if (session && fs.existsSync(todosDir)) {
++      try {
++        const files = fs.readdirSync(todosDir)
++          .filter(f => f.startsWith(session) && f.includes('-agent-') && f.endsWith('.json'))
++          .map(f => ({ name: f, mtime: fs.statSync(path.join(todosDir, f)).mtime }))
++          .sort((a, b) => b.mtime - a.mtime);
++
++        if (files.length > 0) {
++          try {
++            const todos = JSON.parse(fs.readFileSync(path.join(todosDir, files[0].name), 'utf8'));
++            const inProgress = todos.find(t => t.status === 'in_progress');
++            if (inProgress) task = inProgress.activeForm || '';
++          } catch (e) {}
++        }
++      } catch (e) {
++        // Silently fail on file system errors - don't break statusline
++      }
++    }
++
++    // GSD update available?
++    let gsdUpdate = '';
++    const cacheFile = path.join(claudeDir, 'cache', 'gsd-update-check.json');
++    if (fs.existsSync(cacheFile)) {
++      try {
++        const cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
++        if (cache.update_available) {
++          gsdUpdate = '\x1b[33m⬆ /gsd:update\x1b[0m │ ';
++        }
++        if (cache.stale_hooks && cache.stale_hooks.length > 0) {
++          gsdUpdate += '\x1b[31m⚠ stale hooks — run /gsd:update\x1b[0m │ ';
++        }
++      } catch (e) {}
++    }
++
++    // Output
++    const dirname = path.basename(dir);
++    if (task) {
++      process.stdout.write(`${gsdUpdate}\x1b[2m${model}\x1b[0m │ \x1b[1m${task}\x1b[0m │ \x1b[2m${dirname}\x1b[0m${ctx}`);
++    } else {
++      process.stdout.write(`${gsdUpdate}\x1b[2m${model}\x1b[0m │ \x1b[2m${dirname}\x1b[0m${ctx}`);
++    }
++  } catch (e) {
++    // Silent fail - don't break statusline on parse errors
++  }
++});
+diff --git a/.claude/hooks/gsd-statusline.sh b/.claude/hooks/gsd-statusline.sh
+new file mode 100644
+index 0000000..3dc6a56
+--- /dev/null
++++ b/.claude/hooks/gsd-statusline.sh
+@@ -0,0 +1,7 @@
++#!/bin/bash
++# gsd-statusline.sh
++# Shim for ACOS gsd-statusline.js (ported) - statusline event
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++source "$SCRIPT_DIR/lib/hook-env.sh" 2>/dev/null || true
++log_hook_activation "gsd-statusline" "Status" 2>/dev/null || true
++if [ -f "$SCRIPT_DIR/gsd-statusline.js" ]; then cat | node "$SCRIPT_DIR/gsd-statusline.js"; else echo "GSD:${PROJECT_NAME:-?}"; fi
+diff --git a/.claude/hooks/gsd-workflow-guard.js b/.claude/hooks/gsd-workflow-guard.js
+new file mode 100644
+index 0000000..5cee818
+--- /dev/null
++++ b/.claude/hooks/gsd-workflow-guard.js
+@@ -0,0 +1,94 @@
++#!/usr/bin/env node
++// gsd-hook-version: {{GSD_VERSION}}
++// GSD Workflow Guard — PreToolUse hook
++// Detects when Claude attempts file edits outside a GSD workflow context
++// (no active /gsd: command or Task subagent) and injects an advisory warning.
++//
++// This is a SOFT guard — it advises, not blocks. The edit still proceeds.
++// The warning nudges Claude to use /gsd:quick or /gsd:fast instead of
++// making direct edits that bypass state tracking.
++//
++// Enable via config: hooks.workflow_guard: true (default: false)
++// Only triggers on Write/Edit tool calls to non-.planning/ files.
++
++const fs = require('fs');
++const path = require('path');
++
++let input = '';
++const stdinTimeout = setTimeout(() => process.exit(0), 3000);
++process.stdin.setEncoding('utf8');
++process.stdin.on('data', chunk => input += chunk);
++process.stdin.on('end', () => {
++  clearTimeout(stdinTimeout);
++  try {
++    const data = JSON.parse(input);
++    const toolName = data.tool_name;
++
++    // Only guard Write and Edit tool calls
++    if (toolName !== 'Write' && toolName !== 'Edit') {
++      process.exit(0);
++    }
++
++    // Check if we're inside a GSD workflow (Task subagent or /gsd: command)
++    // Subagents have a session_id that differs from the parent
++    // and typically have a description field set by the orchestrator
++    if (data.tool_input?.is_subagent || data.session_type === 'task') {
++      process.exit(0);
++    }
++
++    // Check the file being edited
++    const filePath = data.tool_input?.file_path || data.tool_input?.path || '';
++
++    // Allow edits to .planning/ files (GSD state management)
++    if (filePath.includes('.planning/') || filePath.includes('.planning\\')) {
++      process.exit(0);
++    }
++
++    // Allow edits to common config/docs files that don't need GSD tracking
++    const allowedPatterns = [
++      /\.gitignore$/,
++      /\.env/,
++      /CLAUDE\.md$/,
++      /AGENTS\.md$/,
++      /GEMINI\.md$/,
++      /settings\.json$/,
++    ];
++    if (allowedPatterns.some(p => p.test(filePath))) {
++      process.exit(0);
++    }
++
++    // Check if workflow guard is enabled
++    const cwd = data.cwd || process.cwd();
++    const configPath = path.join(cwd, '.planning', 'config.json');
++    if (fs.existsSync(configPath)) {
++      try {
++        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
++        if (!config.hooks?.workflow_guard) {
++          process.exit(0); // Guard disabled (default)
++        }
++      } catch (e) {
++        process.exit(0);
++      }
++    } else {
++      process.exit(0); // No GSD project — don't guard
++    }
++
++    // If we get here: GSD project, guard enabled, file edit outside .planning/,
++    // not in a subagent context. Inject advisory warning.
++    const output = {
++      hookSpecificOutput: {
++        hookEventName: "PreToolUse",
++        additionalContext: `⚠️ WORKFLOW ADVISORY: You're editing ${path.basename(filePath)} directly without a GSD command. ` +
++          'This edit will not be tracked in STATE.md or produce a SUMMARY.md. ' +
++          'Consider using /gsd:fast for trivial fixes or /gsd:quick for larger changes ' +
++          'to maintain project state tracking. ' +
++          'If this is intentional (e.g., user explicitly asked for a direct edit), proceed normally.'
++      }
++    };
++
++    process.stdout.write(JSON.stringify(output));
++  } catch (e) {
++    // Silent fail — never block tool execution
++    process.exit(0);
++  }
++});
+diff --git a/.claude/hooks/gsd-workflow-guard.sh b/.claude/hooks/gsd-workflow-guard.sh
+new file mode 100644
+index 0000000..d51c0dd
+--- /dev/null
++++ b/.claude/hooks/gsd-workflow-guard.sh
+@@ -0,0 +1,7 @@
++#!/bin/bash
++# gsd-workflow-guard.sh
++# Shim for ACOS gsd-workflow-guard.js (ported)
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++source "$SCRIPT_DIR/lib/hook-env.sh" 2>/dev/null || true
++log_hook_activation "gsd-workflow-guard" "${HARNESS}" 2>/dev/null || true
++if [ -f "$SCRIPT_DIR/gsd-workflow-guard.js" ]; then cat | node "$SCRIPT_DIR/gsd-workflow-guard.js"; else cat; fi
+diff --git a/.claude/hooks/lib/hook-env.sh b/.claude/hooks/lib/hook-env.sh
+new file mode 100644
+index 0000000..ca1bf62
+--- /dev/null
++++ b/.claude/hooks/lib/hook-env.sh
+@@ -0,0 +1,209 @@
++#!/bin/bash
++# lib/hook-env.sh
++# Portable hook environment for multi-harness compatibility.
++# Harnesses: claude, codex, gemini, agy, grok
++# Provides: HARNESS detection, portable PROJECT_ROOT, *_DIR vars, path helpers,
++# generic logging, project naming, and stubs for new events (PreCompact, Notification).
++#
++# Usage: source "$(dirname "$0")/lib/hook-env.sh"
++# Then: use $HARNESS, $PROJECT_ROOT, log_to_sessions etc.
++#
++# God 99: portable, no hardcodes, excellence wired (calls excellence hook if present).
++# Use gstack for any UI verification (via excellence skills if UI changes).
++
++# --- Harness Detection (portable, env + dir + cmd heuristics) ---
++detect_harness() {
++  # Priority: explicit env from harness runtime
++  if [ -n "${CLAUDE_PROJECT_DIR:-}" ] || [ -n "${CLAUDE_SESSION_ID:-}" ] || [ -n "${CLAUDECODE:-}" ] || [ -n "${ANTHROPIC_API_KEY:-}" ]; then
++    echo "claude"
++    return
++  fi
++  if [ -n "${CODEX_SESSION:-}" ] || [ -n "${CODEX_PROJECT_DIR:-}" ] || command -v codex >/dev/null 2>&1; then
++    echo "codex"
++    return
++  fi
++  if [ -n "${GEMINI_CLI:-}" ] || [ -n "${GEMINI_API_KEY:-}" ] || [ -d "${HOME}/.gemini" ] || command -v gemini >/dev/null 2>&1; then
++    echo "gemini"
++    return
++  fi
++  if [ -n "${AGY_SESSION:-}" ] || [ -n "${ANTIGRAVITY_SESSION:-}" ] || [ -d "${HOME}/.antigravity" ] || [ -d "${HOME}/.agy" ]; then
++    echo "agy"
++    return
++  fi
++  if [ -n "${GROK_SESSION:-}" ] || [ -n "${GROK_CLI:-}" ] || [ -d "${HOME}/.grok" ] || [ -n "${XAI_API_KEY:-}" ] || command -v grok >/dev/null 2>&1; then
++    echo "grok"
++    return
++  fi
++  # Fallback from argv if shell invoked with context (rare for hooks)
++  if echo "$0 $*" | grep -qiE 'grok|xai'; then echo "grok"; return; fi
++  if echo "$0 $*" | grep -qiE 'codex'; then echo "codex"; return; fi
++  echo "unknown"
++}
++
++HARNESS="$(detect_harness)"
++export HARNESS
++
++# --- Portable Paths (cross-OS, WSL friendly, overrideable) ---
++# Resolve real user home (handles sudo / wsl)
++resolve_home() {
++  if [ -n "${REAL_HOME:-}" ]; then
++    echo "$REAL_HOME"
++  else
++    echo "${HOME}"
++  fi
++}
++HOME_DIR="$(resolve_home)"
++
++# Windows docs dir auto-detect for WSL (portable sessions log)
++detect_docs_dir() {
++  local docs="${AI_GLOBAL_SESSIONS:-}"
++  if [ -n "$docs" ]; then
++    echo "$docs"
++    return
++  fi
++  if [ -d "/mnt/c/Users" ]; then
++    local winuser
++    winuser=$(cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r\n' || echo "Frank")
++    echo "/mnt/c/Users/${winuser}/docs/AI_GLOBAL_SESSIONS.md"
++  else
++    echo "${HOME_DIR}/docs/AI_GLOBAL_SESSIONS.md"
++  fi
++}
++
++AI_SESSIONS_LOG="$(detect_docs_dir)"
++export AI_SESSIONS_LOG
++
++# Project root: prefer harness env, git, cwd
++detect_project_root() {
++  local root="${CLAUDE_PROJECT_DIR:-}"
++  [ -z "$root" ] && root="${CODEX_PROJECT_DIR:-}"
++  [ -z "$root" ] && root="${GROK_PROJECT_DIR:-}"
++  [ -z "$root" ] && root="${AGY_PROJECT_DIR:-}"
++  if [ -z "$root" ] && command -v git >/dev/null 2>&1; then
++    root=$(git rev-parse --show-toplevel 2>/dev/null || true)
++  fi
++  [ -z "$root" ] && root="$(pwd)"
++  echo "$root"
++}
++
++PROJECT_ROOT="$(detect_project_root)"
++export PROJECT_ROOT
++
++# Harness-specific global dirs (with claude compat fallback for skills)
++case "$HARNESS" in
++  claude)
++    GLOBAL_HOOKS_DIR="${HOME_DIR}/.claude/hooks"
++    GLOBAL_SKILLS_DIR="${HOME_DIR}/.claude/skills"
++    GLOBAL_AGENTS_DIR="${HOME_DIR}/.claude/agents"
++    ;;
++  grok)
++    GLOBAL_HOOKS_DIR="${HOME_DIR}/.grok/hooks"
++    GLOBAL_SKILLS_DIR="${HOME_DIR}/.grok/skills:${HOME_DIR}/.claude/skills"  # compat
++    GLOBAL_AGENTS_DIR="${HOME_DIR}/.grok/agents:${HOME_DIR}/.claude/agents"
++    # Grok JSON hooks support (SessionStart/PreToolUse excellence gates are .json)
++    GROK_JSON_HOOKS=1
++    export GROK_JSON_HOOKS
++    ;;
++  codex)
++    GLOBAL_HOOKS_DIR="${HOME_DIR}/.codex/hooks"
++    GLOBAL_SKILLS_DIR="${HOME_DIR}/.codex/skills:${HOME_DIR}/.claude/skills"
++    GLOBAL_AGENTS_DIR="${HOME_DIR}/.codex/agents"
++    ;;
++  gemini)
++    GLOBAL_HOOKS_DIR="${HOME_DIR}/.gemini/hooks"
++    GLOBAL_SKILLS_DIR="${HOME_DIR}/.gemini/skills:${HOME_DIR}/.claude/skills"
++    GLOBAL_AGENTS_DIR="${HOME_DIR}/.gemini/agents"
++    ;;
++  agy)
++    GLOBAL_HOOKS_DIR="${HOME_DIR}/.antigravity/hooks:${HOME_DIR}/.agy/hooks"
++    GLOBAL_SKILLS_DIR="${HOME_DIR}/.antigravity/skills:${HOME_DIR}/.claude/skills"
++    GLOBAL_AGENTS_DIR="${HOME_DIR}/.antigravity/agents"
++    ;;
++  *)
++    GLOBAL_HOOKS_DIR="${HOME_DIR}/.claude/hooks"
++    GLOBAL_SKILLS_DIR="${HOME_DIR}/.claude/skills"
++    GLOBAL_AGENTS_DIR="${HOME_DIR}/.claude/agents"
++    ;;
++esac
++export GLOBAL_HOOKS_DIR GLOBAL_SKILLS_DIR GLOBAL_AGENTS_DIR
++
++# Local project dirs (relative to PROJECT_ROOT)
++PROJECT_HOOKS_DIR="${PROJECT_ROOT}/.claude/hooks"
++PROJECT_SKILLS_DIR="${PROJECT_ROOT}/.claude/skills"
++export PROJECT_HOOKS_DIR PROJECT_SKILLS_DIR
++
++# --- Generic Project Name (agnostic, no frankx hardcodes) ---
++get_project_name() {
++  local name
++  name="$(basename "$PROJECT_ROOT")"
++  # Optional light mapping for known (can be extended)
++  case "$name" in
++    FrankX|frankx) name="FrankX" ;;
++    agentic-creator-os|ACOS) name="ACOS" ;;
++    arcanea*) name="Arcanea" ;;
++  esac
++  echo "$name"
++}
++
++PROJECT_NAME="$(get_project_name)"
++export PROJECT_NAME
++
++# --- Logging / Excellence Wiring ---
++log_hook_activation() {
++  local hook_name="${1:-unknown}"
++  local event="${2:-${CLAUDE_HOOK_EVENT:-UserPromptSubmit}}"
++  local ts
++  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
++  # append to sessions if exists
++  if [ -n "$AI_SESSIONS_LOG" ] && [ -f "$AI_SESSIONS_LOG" ]; then
++    echo "- [${ts}] hook:${hook_name} harness:${HARNESS} event:${event} project:${PROJECT_NAME}" >> "$AI_SESSIONS_LOG" 2>/dev/null || true
++  fi
++  # wire excellence if present (call excellence hook or skill non-blocking)
++  local exc_sh="${GLOBAL_HOOKS_DIR}/excellence-hook.sh"
++  if [ -x "$exc_sh" ]; then
++    "$exc_sh" "$hook_name" "$event" >/dev/null 2>&1 &
++  fi
++}
++
++# Generic session log append (used by session-logger etc)
++append_session_log() {
++  local content="$1"
++  if [ -n "$AI_SESSIONS_LOG" ]; then
++    mkdir -p "$(dirname "$AI_SESSIONS_LOG")" 2>/dev/null || true
++    echo "$content" >> "$AI_SESSIONS_LOG" 2>/dev/null || true
++  fi
++}
++
++# --- New Event Stubs (PreCompact / Notification) ---
++# These can be sourced or the stub files can call them.
++handle_precompact() {
++  local input="${1:-}"
++  log_hook_activation "pre-compact" "PreCompact"
++  # Default: allow compact, optionally inject summary hint via stdout json if needed
++  # For claude-like: echo '{"hookSpecificOutput":{"hookEventName":"PreCompact","additionalContext":"..."}}'
++  echo "$input"
++}
++
++handle_notification() {
++  local input="${1:-}"
++  log_hook_activation "notification" "Notification"
++  echo "$input"
++}
++
++# --- Hook Input Helpers (stdin json friendly) ---
++read_hook_input() {
++  # Read all stdin safely (with size guard)
++  local max=1048576
++  local raw=""
++  local chunk
++  while IFS= read -r -n 4096 chunk; do
++    raw+="$chunk"
++    if [ ${#raw} -gt $max ]; then break; fi
++  done
++  echo "$raw"
++}
++
++# --- Init: log that env loaded (for debug) ---
++# comment to reduce noise: log_hook_activation "hook-env" "env-loaded"
++
++# End of hook-env.sh (portable excellence base)
+diff --git a/.claude/hooks/lib/resolve-formatter.js b/.claude/hooks/lib/resolve-formatter.js
+new file mode 100644
+index 0000000..6a8ae62
+--- /dev/null
++++ b/.claude/hooks/lib/resolve-formatter.js
+@@ -0,0 +1,70 @@
++'use strict';
++
++const fs = require('fs');
++const path = require('path');
++
++/**
++ * Minimal portable project root finder.
++ * Walks up from startDir looking for package.json or .git.
++ */
++function findProjectRoot(startDir) {
++  let dir = path.resolve(startDir || process.cwd());
++  const root = path.parse(dir).root;
++  while (dir !== root) {
++    if (
++      fs.existsSync(path.join(dir, 'package.json')) ||
++      fs.existsSync(path.join(dir, '.git'))
++    ) {
++      return dir;
++    }
++    dir = path.dirname(dir);
++  }
++  return startDir || process.cwd();
++}
++
++/**
++ * Detect formatter (biome or prettier) based on config presence or package deps.
++ */
++function detectFormatter(projectRoot) {
++  const root = projectRoot || process.cwd();
++  const biomeConfig = path.join(root, 'biome.json');
++  const biomeJsConfig = path.join(root, 'biome.config.js');
++  if (fs.existsSync(biomeConfig) || fs.existsSync(biomeJsConfig)) {
++    return 'biome';
++  }
++  const pkgPath = path.join(root, 'package.json');
++  if (fs.existsSync(pkgPath)) {
++    try {
++      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
++      const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
++      if (deps.biome || deps['@biomejs/biome'] || deps['biomejs']) return 'biome';
++      if (deps.prettier) return 'prettier';
++    } catch {}
++  }
++  const prettierrc = path.join(root, '.prettierrc');
++  const prettierJs = path.join(root, 'prettier.config.js');
++  const prettierCjs = path.join(root, 'prettier.config.cjs');
++  if (fs.existsSync(prettierrc) || fs.existsSync(prettierJs) || fs.existsSync(prettierCjs)) {
++    return 'prettier';
++  }
++  return null;
++}
++
++/**
++ * Resolve local or npx bin for the formatter.
++ * Returns { bin: string, prefix: string[] } suitable for spawn.
++ */
++function resolveFormatterBin(projectRoot, formatter) {
++  const root = projectRoot || process.cwd();
++  const isBiome = formatter === 'biome';
++  const binName = isBiome ? 'biome' : 'prettier';
++  const local = path.join(root, 'node_modules', '.bin', binName);
++  if (fs.existsSync(local)) {
++    return { bin: local, prefix: [] };
++  }
++  // Fallback to npx (works cross platform)
++  const npxPkg = isBiome ? '@biomejs/biome' : 'prettier';
++  return { bin: 'npx', prefix: [npxPkg] };
++}
++
++module.exports = { findProjectRoot, detectFormatter, resolveFormatterBin };
+diff --git a/.claude/hooks/lib/utils.js b/.claude/hooks/lib/utils.js
+new file mode 100644
+index 0000000..254304b
+--- /dev/null
++++ b/.claude/hooks/lib/utils.js
+@@ -0,0 +1,52 @@
++'use strict';
++
++const fs = require('fs');
++const path = require('path');
++
++/** Sessions dir (portable, respects env or falls back to ~/.claude/sessions or equiv). */
++function getSessionsDir() {
++  if (process.env.CLAUDE_SESSIONS_DIR) return process.env.CLAUDE_SESSIONS_DIR;
++  const home = process.env.HOME || process.env.USERPROFILE || process.cwd();
++  return path.join(home, '.claude', 'sessions');
++}
++
++function getDateTimeString() {
++  return new Date().toISOString();
++}
++
++function getTimeString() {
++  return new Date().toLocaleTimeString();
++}
++
++/** Very lightweight find (no full glob dep). Matches simple *-pattern in dir. */
++function findFiles(dir, pattern) {
++  const out = [];
++  if (!fs.existsSync(dir)) return out;
++  const re = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
++  for (const name of fs.readdirSync(dir)) {
++    if (re.test(name)) out.push({ path: path.join(dir, name) });
++  }
++  return out;
++}
++
++function ensureDir(dir) {
++  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
++}
++
++function appendFile(file, content) {
++  fs.appendFileSync(file, content, 'utf8');
++}
++
++function log(msg) {
++  console.log(msg);
++}
++
++module.exports = {
++  getSessionsDir,
++  getDateTimeString,
++  getTimeString,
++  findFiles,
++  ensureDir,
++  appendFile,
++  log
++};
+diff --git a/.claude/hooks/mcp-health-check.js b/.claude/hooks/mcp-health-check.js
+new file mode 100644
+index 0000000..80a535e
+--- /dev/null
++++ b/.claude/hooks/mcp-health-check.js
+@@ -0,0 +1,619 @@
++#!/usr/bin/env node
++'use strict';
++
++/**
++ * MCP health-check hook.
++ *
++ * Compatible with Claude Code's existing hook events:
++ * - PreToolUse: probe MCP server health before MCP tool execution
++ * - PostToolUseFailure: mark unhealthy servers, attempt reconnect, and re-probe
++ *
++ * The hook persists health state outside the conversation context so it
++ * survives compaction and later turns.
++ */
++
++const fs = require('fs');
++const os = require('os');
++const path = require('path');
++const http = require('http');
++const https = require('https');
++const { spawn, spawnSync } = require('child_process');
++
++const MAX_STDIN = 1024 * 1024;
++const DEFAULT_TTL_MS = 2 * 60 * 1000;
++const DEFAULT_TIMEOUT_MS = 5000;
++const DEFAULT_BACKOFF_MS = 30 * 1000;
++const MAX_BACKOFF_MS = 10 * 60 * 1000;
++const HEALTHY_HTTP_CODES = new Set([200, 201, 202, 204, 301, 302, 303, 304, 307, 308, 405]);
++const RECONNECT_STATUS_CODES = new Set([401, 403, 429, 503]);
++const FAILURE_PATTERNS = [
++  { code: 401, pattern: /\b401\b|unauthori[sz]ed|auth(?:entication)?\s+(?:failed|expired|invalid)/i },
++  { code: 403, pattern: /\b403\b|forbidden|permission denied/i },
++  { code: 429, pattern: /\b429\b|rate limit|too many requests/i },
++  { code: 503, pattern: /\b503\b|service unavailable|overloaded|temporarily unavailable/i },
++  { code: 'transport', pattern: /ECONNREFUSED|ENOTFOUND|EAI_AGAIN|timed? out|socket hang up|connection (?:failed|lost|reset|closed)/i }
++];
++
++function envNumber(name, fallback) {
++  const value = Number(process.env[name]);
++  return Number.isFinite(value) && value >= 0 ? value : fallback;
++}
++
++function stateFilePath() {
++  if (process.env.ECC_MCP_HEALTH_STATE_PATH) {
++    return path.resolve(process.env.ECC_MCP_HEALTH_STATE_PATH);
++  }
++  return path.join(os.homedir(), '.claude', 'mcp-health-cache.json');
++}
++
++function configPaths() {
++  if (process.env.ECC_MCP_CONFIG_PATH) {
++    return process.env.ECC_MCP_CONFIG_PATH
++      .split(path.delimiter)
++      .map(entry => entry.trim())
++      .filter(Boolean)
++      .map(entry => path.resolve(entry));
++  }
++
++  const cwd = process.cwd();
++  const home = os.homedir();
++
++  return [
++    path.join(cwd, '.claude.json'),
++    path.join(cwd, '.claude', 'settings.json'),
++    path.join(home, '.claude.json'),
++    path.join(home, '.claude', 'settings.json')
++  ];
++}
++
++function readJsonFile(filePath) {
++  try {
++    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
++  } catch {
++    return null;
++  }
++}
++
++function loadState(filePath) {
++  const state = readJsonFile(filePath);
++  if (!state || typeof state !== 'object' || Array.isArray(state)) {
++    return { version: 1, servers: {} };
++  }
++
++  if (!state.servers || typeof state.servers !== 'object' || Array.isArray(state.servers)) {
++    state.servers = {};
++  }
++
++  return state;
++}
++
++function saveState(filePath, state) {
++  try {
++    fs.mkdirSync(path.dirname(filePath), { recursive: true });
++    fs.writeFileSync(filePath, JSON.stringify(state, null, 2));
++  } catch {
++    // Never block the hook on state persistence errors.
++  }
++}
++
++function readRawStdin() {
++  return new Promise(resolve => {
++    let raw = '';
++    let truncated = /^(1|true|yes)$/i.test(String(process.env.ECC_HOOK_INPUT_TRUNCATED || ''));
++    process.stdin.setEncoding('utf8');
++    process.stdin.on('data', chunk => {
++      if (raw.length < MAX_STDIN) {
++        const remaining = MAX_STDIN - raw.length;
++        raw += chunk.substring(0, remaining);
++        if (chunk.length > remaining) {
++          truncated = true;
++        }
++      } else {
++        truncated = true;
++      }
++    });
++    process.stdin.on('end', () => resolve({ raw, truncated }));
++    process.stdin.on('error', () => resolve({ raw, truncated }));
++  });
++}
++
++function safeParse(raw) {
++  try {
++    return raw.trim() ? JSON.parse(raw) : {};
++  } catch {
++    return {};
++  }
++}
++
++function extractMcpTarget(input) {
++  const toolName = String(input.tool_name || input.name || '');
++  const explicitServer = input.server
++    || input.mcp_server
++    || input.tool_input?.server
++    || input.tool_input?.mcp_server
++    || input.tool_input?.connector
++    || null;
++  const explicitTool = input.tool
++    || input.mcp_tool
++    || input.tool_input?.tool
++    || input.tool_input?.mcp_tool
++    || null;
++
++  if (explicitServer) {
++    return {
++      server: String(explicitServer),
++      tool: explicitTool ? String(explicitTool) : toolName
++    };
++  }
++
++  if (!toolName.startsWith('mcp__')) {
++    return null;
++  }
++
++  const segments = toolName.slice(5).split('__');
++  if (segments.length < 2 || !segments[0]) {
++    return null;
++  }
++
++  return {
++    server: segments[0],
++    tool: segments.slice(1).join('__')
++  };
++}
++
++function extractMcpTargetFromRaw(raw) {
++  const toolNameMatch = raw.match(/"(?:tool_name|name)"\s*:\s*"([^"]+)"/);
++  const serverMatch = raw.match(/"(?:server|mcp_server|connector)"\s*:\s*"([^"]+)"/);
++  const toolMatch = raw.match(/"(?:tool|mcp_tool)"\s*:\s*"([^"]+)"/);
++
++  return extractMcpTarget({
++    tool_name: toolNameMatch ? toolNameMatch[1] : '',
++    server: serverMatch ? serverMatch[1] : undefined,
++    tool: toolMatch ? toolMatch[1] : undefined
++  });
++}
++
++function resolveServerConfig(serverName) {
++  for (const filePath of configPaths()) {
++    const data = readJsonFile(filePath);
++    const server = data?.mcpServers?.[serverName]
++      || data?.mcp_servers?.[serverName]
++      || null;
++
++    if (server && typeof server === 'object' && !Array.isArray(server)) {
++      return {
++        config: server,
++        source: filePath
++      };
++    }
++  }
++
++  return null;
++}
++
++function markHealthy(state, serverName, now, details = {}) {
++  state.servers[serverName] = {
++    status: 'healthy',
++    checkedAt: now,
++    expiresAt: now + envNumber('ECC_MCP_HEALTH_TTL_MS', DEFAULT_TTL_MS),
++    failureCount: 0,
++    lastError: null,
++    lastFailureCode: null,
++    nextRetryAt: now,
++    lastRestoredAt: now,
++    ...details
++  };
++}
++
++function markUnhealthy(state, serverName, now, failureCode, errorMessage) {
++  const previous = state.servers[serverName] || {};
++  const failureCount = Number(previous.failureCount || 0) + 1;
++  const backoffBase = envNumber('ECC_MCP_HEALTH_BACKOFF_MS', DEFAULT_BACKOFF_MS);
++  const nextRetryDelay = Math.min(backoffBase * (2 ** Math.max(failureCount - 1, 0)), MAX_BACKOFF_MS);
++
++  state.servers[serverName] = {
++    status: 'unhealthy',
++    checkedAt: now,
++    expiresAt: now,
++    failureCount,
++    lastError: errorMessage || null,
++    lastFailureCode: failureCode || null,
++    nextRetryAt: now + nextRetryDelay,
++    lastRestoredAt: previous.lastRestoredAt || null
++  };
++}
++
++function failureSummary(input) {
++  const output = input.tool_output;
++  const pieces = [
++    typeof input.error === 'string' ? input.error : '',
++    typeof input.message === 'string' ? input.message : '',
++    typeof input.tool_response === 'string' ? input.tool_response : '',
++    typeof output === 'string' ? output : '',
++    typeof output?.output === 'string' ? output.output : '',
++    typeof output?.stderr === 'string' ? output.stderr : '',
++    typeof input.tool_input?.error === 'string' ? input.tool_input.error : ''
++  ].filter(Boolean);
++
++  return pieces.join('\n');
++}
++
++function detectFailureCode(text) {
++  const summary = String(text || '');
++  for (const entry of FAILURE_PATTERNS) {
++    if (entry.pattern.test(summary)) {
++      return entry.code;
++    }
++  }
++  return null;
++}
++
++function requestHttp(urlString, headers, timeoutMs) {
++  return new Promise(resolve => {
++    let settled = false;
++    let timedOut = false;
++
++    const url = new URL(urlString);
++    const client = url.protocol === 'https:' ? https : http;
++
++    const req = client.request(
++      url,
++      {
++        method: 'GET',
++        headers,
++      },
++      res => {
++        if (settled) return;
++        settled = true;
++        res.resume();
++        resolve({
++          ok: HEALTHY_HTTP_CODES.has(res.statusCode),
++          statusCode: res.statusCode,
++          reason: `HTTP ${res.statusCode}`
++        });
++      }
++    );
++
++    req.setTimeout(timeoutMs, () => {
++      timedOut = true;
++      req.destroy(new Error('timeout'));
++    });
++
++    req.on('error', error => {
++      if (settled) return;
++      settled = true;
++      resolve({
++        ok: false,
++        statusCode: null,
++        reason: timedOut ? 'request timed out' : error.message
++      });
++    });
++
++    req.end();
++  });
++}
++
++function probeCommandServer(serverName, config) {
++  return new Promise(resolve => {
++    const command = config.command;
++    const args = Array.isArray(config.args) ? config.args.map(arg => String(arg)) : [];
++    const timeoutMs = envNumber('ECC_MCP_HEALTH_TIMEOUT_MS', DEFAULT_TIMEOUT_MS);
++    const mergedEnv = {
++      ...process.env,
++      ...(config.env && typeof config.env === 'object' && !Array.isArray(config.env) ? config.env : {})
++    };
++
++    let stderr = '';
++    let done = false;
++
++    function finish(result) {
++      if (done) return;
++      done = true;
++      resolve(result);
++    }
++
++    let child;
++    try {
++      child = spawn(command, args, {
++        env: mergedEnv,
++        cwd: process.cwd(),
++        stdio: ['pipe', 'ignore', 'pipe']
++      });
++    } catch (error) {
++      finish({
++        ok: false,
++        statusCode: null,
++        reason: error.message
++      });
++      return;
++    }
++
++    child.stderr.on('data', chunk => {
++      if (stderr.length < 4000) {
++        const remaining = 4000 - stderr.length;
++        stderr += String(chunk).slice(0, remaining);
++      }
++    });
++
++    child.on('error', error => {
++      finish({
++        ok: false,
++        statusCode: null,
++        reason: error.message
++      });
++    });
++
++    child.on('exit', (code, signal) => {
++      finish({
++        ok: false,
++        statusCode: code,
++        reason: stderr.trim() || `process exited before handshake (${signal || code || 'unknown'})`
++      });
++    });
++
++    const timer = setTimeout(() => {
++      try {
++        child.kill('SIGTERM');
++      } catch {
++        // ignore
++      }
++
++      setTimeout(() => {
++        try {
++          child.kill('SIGKILL');
++        } catch {
++          // ignore
++        }
++      }, 200).unref?.();
++
++      finish({
++        ok: true,
++        statusCode: null,
++        reason: `${serverName} accepted a new stdio process`
++      });
++    }, timeoutMs);
++
++    if (typeof timer.unref === 'function') {
++      timer.unref();
++    }
++  });
++}
++
++async function probeServer(serverName, resolvedConfig) {
++  const config = resolvedConfig.config;
++
++  if (config.type === 'http' || config.url) {
++    const result = await requestHttp(config.url, config.headers || {}, envNumber('ECC_MCP_HEALTH_TIMEOUT_MS', DEFAULT_TIMEOUT_MS));
++
++    return {
++      ok: result.ok,
++      failureCode: RECONNECT_STATUS_CODES.has(result.statusCode) ? result.statusCode : null,
++      reason: result.reason,
++      source: resolvedConfig.source
++    };
++  }
++
++  if (config.command) {
++    const result = await probeCommandServer(serverName, config);
++
++    return {
++      ok: result.ok,
++      failureCode: RECONNECT_STATUS_CODES.has(result.statusCode) ? result.statusCode : null,
++      reason: result.reason,
++      source: resolvedConfig.source
++    };
++  }
++
++  return {
++    ok: false,
++    failureCode: null,
++    reason: 'unsupported MCP server config',
++    source: resolvedConfig.source
++  };
++}
++
++function reconnectCommand(serverName) {
++  const key = `ECC_MCP_RECONNECT_${String(serverName).toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
++  const command = process.env[key] || process.env.ECC_MCP_RECONNECT_COMMAND || '';
++  if (!command.trim()) {
++    return null;
++  }
++
++  return command.includes('{server}')
++    ? command.replace(/\{server\}/g, serverName)
++    : command;
++}
++
++function attemptReconnect(serverName) {
++  const command = reconnectCommand(serverName);
++  if (!command) {
++    return { attempted: false, success: false, reason: 'no reconnect command configured' };
++  }
++
++  const result = spawnSync(command, {
++    shell: true,
++    env: process.env,
++    cwd: process.cwd(),
++    encoding: 'utf8',
++    timeout: envNumber('ECC_MCP_RECONNECT_TIMEOUT_MS', DEFAULT_TIMEOUT_MS)
++  });
++
++  if (result.error) {
++    return { attempted: true, success: false, reason: result.error.message };
++  }
++
++  if (result.status !== 0) {
++    return {
++      attempted: true,
++      success: false,
++      reason: (result.stderr || result.stdout || `reconnect exited ${result.status}`).trim()
++    };
++  }
++
++  return { attempted: true, success: true, reason: 'reconnect command completed' };
++}
++
++function shouldFailOpen() {
++  return /^(1|true|yes)$/i.test(String(process.env.ECC_MCP_HEALTH_FAIL_OPEN || ''));
++}
++
++function emitLogs(logs) {
++  for (const line of logs) {
++    process.stderr.write(`${line}\n`);
++  }
++}
++
++async function handlePreToolUse(rawInput, input, target, statePathValue, now) {
++  const logs = [];
++  const state = loadState(statePathValue);
++  const previous = state.servers[target.server] || {};
++
++  if (previous.status === 'healthy' && Number(previous.expiresAt || 0) > now) {
++    return { rawInput, exitCode: 0, logs };
++  }
++
++  if (previous.status === 'unhealthy' && Number(previous.nextRetryAt || 0) > now) {
++    logs.push(
++      `[MCPHealthCheck] ${target.server} is marked unhealthy until ${new Date(previous.nextRetryAt).toISOString()}; skipping ${target.tool || 'tool'}`
++    );
++    return { rawInput, exitCode: shouldFailOpen() ? 0 : 2, logs };
++  }
++
++  const resolvedConfig = resolveServerConfig(target.server);
++  if (!resolvedConfig) {
++    logs.push(`[MCPHealthCheck] No MCP config found for ${target.server}; skipping preflight probe`);
++    return { rawInput, exitCode: 0, logs };
++  }
++
++  const probe = await probeServer(target.server, resolvedConfig);
++  if (probe.ok) {
++    markHealthy(state, target.server, now, { source: resolvedConfig.source });
++    saveState(statePathValue, state);
++
++    if (previous.status === 'unhealthy') {
++      logs.push(`[MCPHealthCheck] ${target.server} connection restored`);
++    }
++
++    return { rawInput, exitCode: 0, logs };
++  }
++
++  let reconnect = { attempted: false, success: false, reason: 'probe failed' };
++  if (probe.failureCode || previous.status === 'unhealthy') {
++    reconnect = attemptReconnect(target.server);
++    if (reconnect.success) {
++      const reprobe = await probeServer(target.server, resolvedConfig);
++      if (reprobe.ok) {
++        markHealthy(state, target.server, now, {
++          source: resolvedConfig.source,
++          restoredBy: 'reconnect-command'
++        });
++        saveState(statePathValue, state);
++        logs.push(`[MCPHealthCheck] ${target.server} connection restored after reconnect`);
++        return { rawInput, exitCode: 0, logs };
++      }
++      probe.reason = `${probe.reason}; reconnect reprobe failed: ${reprobe.reason}`;
++    }
++  }
++
++  markUnhealthy(state, target.server, now, probe.failureCode, probe.reason);
++  saveState(statePathValue, state);
++
++  const reconnectSuffix = reconnect.attempted
++    ? ` Reconnect attempt: ${reconnect.success ? 'ok' : reconnect.reason}.`
++    : '';
++  logs.push(
++    `[MCPHealthCheck] ${target.server} is unavailable (${probe.reason}). Blocking ${target.tool || 'tool'} so Claude can fall back to non-MCP tools.${reconnectSuffix}`
++  );
++
++  return { rawInput, exitCode: shouldFailOpen() ? 0 : 2, logs };
++}
++
++async function handlePostToolUseFailure(rawInput, input, target, statePathValue, now) {
++  const logs = [];
++  const summary = failureSummary(input);
++  const failureCode = detectFailureCode(summary);
++
++  if (!failureCode) {
++    return { rawInput, exitCode: 0, logs };
++  }
++
++  const state = loadState(statePathValue);
++  markUnhealthy(state, target.server, now, failureCode, summary.slice(0, 500));
++  saveState(statePathValue, state);
++
++  logs.push(`[MCPHealthCheck] ${target.server} reported ${failureCode}; marking server unhealthy and attempting reconnect`);
++
++  const reconnect = attemptReconnect(target.server);
++  if (!reconnect.attempted) {
++    logs.push(`[MCPHealthCheck] ${target.server} reconnect skipped: ${reconnect.reason}`);
++    return { rawInput, exitCode: 0, logs };
++  }
++
++  if (!reconnect.success) {
++    logs.push(`[MCPHealthCheck] ${target.server} reconnect failed: ${reconnect.reason}`);
++    return { rawInput, exitCode: 0, logs };
++  }
++
++  const resolvedConfig = resolveServerConfig(target.server);
++  if (!resolvedConfig) {
++    logs.push(`[MCPHealthCheck] ${target.server} reconnect completed but no config was available for a follow-up probe`);
++    return { rawInput, exitCode: 0, logs };
++  }
++
++  const reprobe = await probeServer(target.server, resolvedConfig);
++  if (!reprobe.ok) {
++    logs.push(`[MCPHealthCheck] ${target.server} reconnect command ran, but health probe still failed: ${reprobe.reason}`);
++    return { rawInput, exitCode: 0, logs };
++  }
++
++  const refreshed = loadState(statePathValue);
++  markHealthy(refreshed, target.server, now, {
++    source: resolvedConfig.source,
++    restoredBy: 'post-failure-reconnect'
++  });
++  saveState(statePathValue, refreshed);
++  logs.push(`[MCPHealthCheck] ${target.server} connection restored`);
++  return { rawInput, exitCode: 0, logs };
++}
++
++async function main() {
++  const { raw: rawInput, truncated } = await readRawStdin();
++  const input = safeParse(rawInput);
++  const target = extractMcpTarget(input) || (truncated ? extractMcpTargetFromRaw(rawInput) : null);
++
++  if (!target) {
++    process.stdout.write(rawInput);
++    process.exit(0);
++    return;
++  }
++
++  if (truncated) {
++    const limit = Number(process.env.ECC_HOOK_INPUT_MAX_BYTES) || MAX_STDIN;
++    const logs = [
++      shouldFailOpen()
++        ? `[MCPHealthCheck] Hook input exceeded ${limit} bytes while checking ${target.server}; allowing ${target.tool || 'tool'} because fail-open mode is enabled`
++        : `[MCPHealthCheck] Hook input exceeded ${limit} bytes while checking ${target.server}; blocking ${target.tool || 'tool'} to avoid bypassing MCP health checks`
++    ];
++    emitLogs(logs);
++    process.stdout.write(rawInput);
++    process.exit(shouldFailOpen() ? 0 : 2);
++    return;
++  }
++
++  const eventName = process.env.CLAUDE_HOOK_EVENT_NAME || 'PreToolUse';
++  const now = Date.now();
++  const statePathValue = stateFilePath();
++
++  const result = eventName === 'PostToolUseFailure'
++    ? await handlePostToolUseFailure(rawInput, input, target, statePathValue, now)
++    : await handlePreToolUse(rawInput, input, target, statePathValue, now);
++
++  emitLogs(result.logs);
++  process.stdout.write(result.rawInput);
++  process.exit(result.exitCode);
++}
++
++main().catch(error => {
++  process.stderr.write(`[MCPHealthCheck] Unexpected error: ${error.message}\n`);
++  process.exit(0);
++});
+diff --git a/.claude/hooks/mcp-health-check.sh b/.claude/hooks/mcp-health-check.sh
+new file mode 100644
+index 0000000..f8215c3
+--- /dev/null
++++ b/.claude/hooks/mcp-health-check.sh
+@@ -0,0 +1,7 @@
++#!/bin/bash
++# mcp-health-check.sh
++# Shim for ACOS mcp-health-check.js (ported)
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++source "$SCRIPT_DIR/lib/hook-env.sh" 2>/dev/null || true
++log_hook_activation "mcp-health-check" "${HARNESS}" 2>/dev/null || true
++if [ -f "$SCRIPT_DIR/mcp-health-check.js" ]; then cat | node "$SCRIPT_DIR/mcp-health-check.js"; else cat; fi
+diff --git a/.claude/hooks/memory-check.sh b/.claude/hooks/memory-check.sh
+new file mode 100644
+index 0000000..1593bf0
+--- /dev/null
++++ b/.claude/hooks/memory-check.sh
+@@ -0,0 +1,35 @@
++#!/bin/bash
++# ACOS Memory Guardian — SessionStart hook
++# Reports WSL memory status, warns if pressure is high
++
++MEM_TOTAL=$(free -m | awk '/^Mem:/{print $2}')
++MEM_USED=$(free -m | awk '/^Mem:/{print $3}')
++MEM_AVAIL=$(free -m | awk '/^Mem:/{print $7}')
++SWAP_TOTAL=$(free -m | awk '/^Swap:/{print $2}')
++SWAP_USED=$(free -m | awk '/^Swap:/{print $3}')
++
++# Calculate usage percentage
++MEM_PCT=$((MEM_USED * 100 / MEM_TOTAL))
++
++# Count running claude processes (approximate CC instances)
++CC_COUNT=$(pgrep -f "claude" 2>/dev/null | wc -l)
++
++# Build status line
++STATUS="WSL Memory: ${MEM_USED}MB/${MEM_TOTAL}MB (${MEM_PCT}%)"
++
++if [ "$SWAP_USED" -gt 0 ]; then
++  STATUS="$STATUS | Swap: ${SWAP_USED}MB/${SWAP_TOTAL}MB"
++fi
++
++if [ "$CC_COUNT" -gt 2 ]; then
++  STATUS="$STATUS | ~${CC_COUNT} claude processes detected"
++fi
++
++# Warn thresholds
++if [ "$MEM_PCT" -ge 90 ]; then
++  echo "CRITICAL: $STATUS — Memory critically low. Do NOT spawn additional agents or Task subprocesses. Close unused instances first."
++elif [ "$MEM_PCT" -ge 75 ]; then
++  echo "WARNING: $STATUS — Memory pressure high. Limit parallel Task agents to 2 max. Avoid heavy builds."
++else
++  echo "$STATUS — Healthy. Safe to use parallel agents."
++fi
+diff --git a/.claude/hooks/notification.sh b/.claude/hooks/notification.sh
+new file mode 100644
+index 0000000..d9f7fb5
+--- /dev/null
++++ b/.claude/hooks/notification.sh
+@@ -0,0 +1,13 @@
++#!/bin/bash
++# notification.sh
++# Stub for Notification hook event (portable, multi-harness)
++# Sources hook-env. Implement per-harness notifications (e.g. desktop, slack via excellence).
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++source "$SCRIPT_DIR/lib/hook-env.sh" 2>/dev/null || true
++
++INPUT=$(cat 2>/dev/null || true)
++
++log_hook_activation "notification" "Notification" 2>/dev/null || true
++
++handle_notification "$INPUT"
+diff --git a/.claude/hooks/post-tool-track.js b/.claude/hooks/post-tool-track.js
+new file mode 100644
+index 0000000..9611cc7
+--- /dev/null
++++ b/.claude/hooks/post-tool-track.js
+@@ -0,0 +1,65 @@
++#!/usr/bin/env node
++'use strict';
++
++/**
++ * ACOS PostToolUse Hook (async, fire-and-forget)
++ * - Appends tool operations to _operations.jsonl
++ * - Updates _active.json counters
++ * - Tracks files modified for trajectory summary
++ */
++
++const fs = require('fs');
++const path = require('path');
++
++const TRAJ_DIR = path.join(__dirname, '..', 'trajectories');
++const ACTIVE_META = path.join(TRAJ_DIR, '_active.json');
++const ACTIVE_OPS = path.join(TRAJ_DIR, '_operations.jsonl');
++
++function main() {
++  try {
++    const input = JSON.parse(fs.readFileSync(0, 'utf-8'));
++
++    if (!fs.existsSync(ACTIVE_META)) {
++      process.exit(0);
++      return;
++    }
++
++    const toolName = input.tool_name || 'unknown';
++    const toolInput = input.tool_input || {};
++
++    // Append operation to JSONL (atomic append, no race condition)
++    const op = {
++      t: toolName,
++      ts: Date.now(),
++      ...(toolInput.file_path ? { f: toolInput.file_path } : {}),
++      ...(toolInput.command ? { c: toolInput.command.slice(0, 200) } : {}),
++      ...(toolInput.pattern ? { p: toolInput.pattern.slice(0, 100) } : {}),
++    };
++    fs.appendFileSync(ACTIVE_OPS, JSON.stringify(op) + '\n');
++
++    // Update counters in meta (best-effort, small race window is acceptable)
++    try {
++      const meta = JSON.parse(fs.readFileSync(ACTIVE_META, 'utf-8'));
++      meta.toolCount = (meta.toolCount || 0) + 1;
++
++      // Track files modified
++      if (toolInput.file_path && ['Write', 'Edit', 'NotebookEdit'].includes(toolName)) {
++        if (!meta.filesModified) meta.filesModified = [];
++        const fp = toolInput.file_path;
++        if (!meta.filesModified.includes(fp)) {
++          meta.filesModified.push(fp);
++        }
++      }
++
++      fs.writeFileSync(ACTIVE_META, JSON.stringify(meta, null, 2));
++    } catch {
++      // If meta read/write fails, just skip - operations.jsonl is the source of truth
++    }
++
++    process.exit(0);
++  } catch {
++    process.exit(0);
++  }
++}
++
++main();
+diff --git a/.claude/hooks/pre-commit.sh b/.claude/hooks/pre-commit.sh
+new file mode 100644
+index 0000000..b757824
+--- /dev/null
++++ b/.claude/hooks/pre-commit.sh
+@@ -0,0 +1,55 @@
++#!/bin/bash
++# pre-commit.sh
++# Portable pre-commit hook for automated quality checks (agnostic to harness)
++# Sources hook-env; works in claude/codex/gemini/agy/grok sessions.
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++source "$SCRIPT_DIR/lib/hook-env.sh" 2>/dev/null || true
++
++set -e
++
++log_hook_activation "pre-commit" "PreCommit" 2>/dev/null || true
++
++# Check if we're in a git repo
++if ! git rev-parse --git-dir > /dev/null 2>&1; then
++    exit 0
++fi
++
++# Get the list of staged files
++STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx|sh|md|json)$' || true)
++
++if [ -z "$STAGED_FILES" ]; then
++    exit 0
++fi
++
++echo "[pre-commit] harness=${HARNESS} project=${PROJECT_NAME}"
++
++# Check for package.json to determine if we should run linters
++if [ -f "package.json" ]; then
++    # Run ESLint if available
++    if command -v npx &> /dev/null && npm list eslint &> /dev/null; then
++        echo "🔍 Running ESLint..."
++        echo "$STAGED_FILES" | xargs npx eslint --fix --quiet || true
++    fi
++
++    # Run Prettier if available
++    if command -v npx &> /dev/null && npm list prettier &> /dev/null; then
++        echo "✨ Running Prettier..."
++        echo "$STAGED_FILES" | xargs npx prettier --write --ignore-unknown || true
++    fi
++
++    # Re-stage fixed files
++    echo "$STAGED_FILES" | xargs git add || true
++fi
++
++# Wire ACOS quality if present (portable path)
++if [ -f "${SCRIPT_DIR}/quality-gate.sh" ]; then
++  echo "🛡️ Running quality gate (ACOS port)..."
++  # non blocking for pre-commit
++  echo "$STAGED_FILES" | while read f; do
++    [ -f "$f" ] && (echo '{"tool_input":{"file_path":"'"$f"'"}}' | "${SCRIPT_DIR}/quality-gate.sh" || true)
++  done
++fi
++
++echo "✅ Pre-commit checks complete (harness=${HARNESS})"
++exit 0
+diff --git a/.claude/hooks/pre-compact.js b/.claude/hooks/pre-compact.js
+new file mode 100644
+index 0000000..7b10d8f
+--- /dev/null
++++ b/.claude/hooks/pre-compact.js
+@@ -0,0 +1,56 @@
++#!/usr/bin/env node
++/**
++ * PreCompact Hook - Save state before context compaction
++ *
++ * Cross-platform (Windows, macOS, Linux)
++ *
++ * Runs before Claude compacts context, giving you a chance to
++ * preserve important state that might get lost in summarization.
++ */
++
++const path = require('path');
++
++// Inlined minimal utils (self-contained, no missing lib)
++function getSessionsDir() {
++  return process.env.CLAUDE_SESSIONS_DIR || path.join(process.env.HOME || process.env.USERPROFILE || process.cwd(), '.claude', 'sessions');
++}
++function getDateTimeString() { return new Date().toISOString(); }
++function getTimeString() { return new Date().toLocaleTimeString(); }
++function findFiles(dir, pattern) {
++  const out = [];
++  if (!require('fs').existsSync(dir)) return out;
++  const re = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
++  for (const name of require('fs').readdirSync(dir)) if (re.test(name)) out.push({path: path.join(dir, name)});
++  return out;
++}
++function ensureDir(dir) { if (!require('fs').existsSync(dir)) require('fs').mkdirSync(dir, {recursive: true}); }
++function appendFile(f, c) { require('fs').appendFileSync(f, c, 'utf8'); }
++function log(m) { console.log(m); }
++
++async function main() {
++  const sessionsDir = getSessionsDir();
++  const compactionLog = path.join(sessionsDir, 'compaction-log.txt');
++
++  ensureDir(sessionsDir);
++
++  // Log compaction event with timestamp
++  const timestamp = getDateTimeString();
++  appendFile(compactionLog, `[${timestamp}] Context compaction triggered\n`);
++
++  // If there's an active session file, note the compaction
++  const sessions = findFiles(sessionsDir, '*-session.tmp');
++
++  if (sessions.length > 0) {
++    const activeSession = sessions[0].path;
++    const timeStr = getTimeString();
++    appendFile(activeSession, `\n---\n**[Compaction occurred at ${timeStr}]** - Context was summarized\n`);
++  }
++
++  log('[PreCompact] State saved before compaction');
++  process.exit(0);
++}
++
++main().catch(err => {
++  console.error('[PreCompact] Error:', err.message);
++  process.exit(0);
++});
+diff --git a/.claude/hooks/pre-compact.sh b/.claude/hooks/pre-compact.sh
+new file mode 100644
+index 0000000..3854335
+--- /dev/null
++++ b/.claude/hooks/pre-compact.sh
+@@ -0,0 +1,19 @@
++#!/bin/bash
++# pre-compact.sh
++# Stub for PreCompact hook event (portable, multi-harness)
++# Sources hook-env; extend with ACOS suggest-compact logic if desired.
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++source "$SCRIPT_DIR/lib/hook-env.sh" 2>/dev/null || true
++
++INPUT=$(cat 2>/dev/null || true)
++
++log_hook_activation "pre-compact" "PreCompact" 2>/dev/null || true
++
++# Delegate to handler in env (or ACOS pre-compact.js if present)
++if [ -f "$SCRIPT_DIR/pre-compact.js" ]; then
++  # pass through for node impl (gsd etc)
++  echo "$INPUT" | node "$SCRIPT_DIR/pre-compact.js" || echo "$INPUT"
++else
++  handle_precompact "$INPUT"
++fi
+diff --git a/.claude/hooks/quality-gate.js b/.claude/hooks/quality-gate.js
+new file mode 100644
+index 0000000..14660ce
+--- /dev/null
++++ b/.claude/hooks/quality-gate.js
+@@ -0,0 +1,201 @@
++#!/usr/bin/env node
++/**
++ * Quality Gate Hook
++ *
++ * Runs lightweight quality checks after file edits.
++ * - Targets one file when file_path is provided
++ * - Falls back to no-op when language/tooling is unavailable
++ *
++ * For JS/TS files with Biome, this hook is skipped because
++ * post-edit-format.js already runs `biome check --write`.
++ * This hook still handles .json/.md files for Biome, and all
++ * Prettier / Go / Python checks.
++ */
++
++'use strict';
++
++const fs = require('fs');
++const path = require('path');
++const { spawnSync } = require('child_process');
++
++const MAX_STDIN = 1024 * 1024;
++
++// Inlined minimal portable resolve-formatter (self-contained, no missing lib)
++function findProjectRoot(startDir) {
++  let dir = path.resolve(startDir || process.cwd());
++  const root = path.parse(dir).root;
++  while (dir !== root) {
++    if (fs.existsSync(path.join(dir, 'package.json')) || fs.existsSync(path.join(dir, '.git'))) return dir;
++    dir = path.dirname(dir);
++  }
++  return startDir || process.cwd();
++}
++function detectFormatter(projectRoot) {
++  const root = projectRoot || process.cwd();
++  if (fs.existsSync(path.join(root, 'biome.json')) || fs.existsSync(path.join(root, 'biome.config.js'))) return 'biome';
++  const pkgPath = path.join(root, 'package.json');
++  if (fs.existsSync(pkgPath)) {
++    try {
++      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
++      const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
++      if (deps.biome || deps['@biomejs/biome']) return 'biome';
++      if (deps.prettier) return 'prettier';
++    } catch {}
++  }
++  if (fs.existsSync(path.join(root, '.prettierrc')) || fs.existsSync(path.join(root, 'prettier.config.js'))) return 'prettier';
++  return null;
++}
++function resolveFormatterBin(projectRoot, formatter) {
++  const root = projectRoot || process.cwd();
++  const isBiome = formatter === 'biome';
++  const binName = isBiome ? 'biome' : 'prettier';
++  const local = path.join(root, 'node_modules', '.bin', binName);
++  if (fs.existsSync(local)) return { bin: local, prefix: [] };
++  const npxPkg = isBiome ? '@biomejs/biome' : 'prettier';
++  return { bin: 'npx', prefix: [npxPkg] };
++}
++
++/**
++ * Execute a command synchronously, returning the spawnSync result.
++ *
++ * @param {string} command - Executable path or name
++ * @param {string[]} args - Arguments to pass
++ * @param {string} [cwd] - Working directory (defaults to process.cwd())
++ * @returns {import('child_process').SpawnSyncReturns<string>}
++ */
++function exec(command, args, cwd = process.cwd()) {
++  return spawnSync(command, args, {
++    cwd,
++    encoding: 'utf8',
++    env: process.env,
++    timeout: 15000
++  });
++}
++
++/**
++ * Write a message to stderr for logging.
++ *
++ * @param {string} msg - Message to log
++ */
++function log(msg) {
++  process.stderr.write(`${msg}\n`);
++}
++
++/**
++ * Run quality-gate checks for a single file based on its extension.
++ * Skips JS/TS files when Biome is configured (handled by post-edit-format).
++ *
++ * @param {string} filePath - Path to the edited file
++ */
++function maybeRunQualityGate(filePath) {
++  if (!filePath || !fs.existsSync(filePath)) {
++    return;
++  }
++
++  // Resolve to absolute path so projectRoot-relative comparisons work
++  filePath = path.resolve(filePath);
++
++  const ext = path.extname(filePath).toLowerCase();
++  const fix = String(process.env.ECC_QUALITY_GATE_FIX || '').toLowerCase() === 'true';
++  const strict = String(process.env.ECC_QUALITY_GATE_STRICT || '').toLowerCase() === 'true';
++
++  if (['.ts', '.tsx', '.js', '.jsx', '.json', '.md'].includes(ext)) {
++    const projectRoot = findProjectRoot(path.dirname(filePath));
++    const formatter = detectFormatter(projectRoot);
++
++    if (formatter === 'biome') {
++      // JS/TS already handled by post-edit-format via `biome check --write`
++      if (['.ts', '.tsx', '.js', '.jsx'].includes(ext)) {
++        return;
++      }
++
++      // .json / .md — still need quality gate
++      const resolved = resolveFormatterBin(projectRoot, 'biome');
++      if (!resolved) return;
++      const args = [...resolved.prefix, 'check', filePath];
++      if (fix) args.push('--write');
++      const result = exec(resolved.bin, args, projectRoot);
++      if (result.status !== 0 && strict) {
++        log(`[QualityGate] Biome check failed for ${filePath}`);
++      }
++      return;
++    }
++
++    if (formatter === 'prettier') {
++      const resolved = resolveFormatterBin(projectRoot, 'prettier');
++      if (!resolved) return;
++      const args = [...resolved.prefix, fix ? '--write' : '--check', filePath];
++      const result = exec(resolved.bin, args, projectRoot);
++      if (result.status !== 0 && strict) {
++        log(`[QualityGate] Prettier check failed for ${filePath}`);
++      }
++      return;
++    }
++
++    // No formatter configured — skip
++    return;
++  }
++
++  if (ext === '.go') {
++    if (fix) {
++      const r = exec('gofmt', ['-w', filePath]);
++      if (r.status !== 0 && strict) {
++        log(`[QualityGate] gofmt failed for ${filePath}`);
++      }
++    } else if (strict) {
++      const r = exec('gofmt', ['-l', filePath]);
++      if (r.status !== 0) {
++        log(`[QualityGate] gofmt failed for ${filePath}`);
++      } else if (r.stdout && r.stdout.trim()) {
++        log(`[QualityGate] gofmt check failed for ${filePath}`);
++      }
++    }
++    return;
++  }
++
++  if (ext === '.py') {
++    const args = ['format'];
++    if (!fix) args.push('--check');
++    args.push(filePath);
++    const r = exec('ruff', args);
++    if (r.status !== 0 && strict) {
++      log(`[QualityGate] Ruff check failed for ${filePath}`);
++    }
++  }
++}
++
++/**
++ * Core logic — exported so run-with-flags.js can call directly.
++ *
++ * @param {string} rawInput - Raw JSON string from stdin
++ * @returns {string} The original input (pass-through)
++ */
++function run(rawInput) {
++  try {
++    const input = JSON.parse(rawInput);
++    const filePath = String(input.tool_input?.file_path || '');
++    maybeRunQualityGate(filePath);
++  } catch {
++    // Ignore parse errors.
++  }
++  return rawInput;
++}
++
++// ── stdin entry point (backwards-compatible) ────────────────────
++if (require.main === module) {
++  let raw = '';
++  process.stdin.setEncoding('utf8');
++  process.stdin.on('data', chunk => {
++    if (raw.length < MAX_STDIN) {
++      const remaining = MAX_STDIN - raw.length;
++      raw += chunk.substring(0, remaining);
++    }
++  });
++
++  process.stdin.on('end', () => {
++    const result = run(raw);
++    process.stdout.write(result);
++  });
++}
++
++module.exports = { run };
+diff --git a/.claude/hooks/quality-gate.sh b/.claude/hooks/quality-gate.sh
+new file mode 100644
+index 0000000..567e330
+--- /dev/null
++++ b/.claude/hooks/quality-gate.sh
+@@ -0,0 +1,15 @@
++#!/bin/bash
++# quality-gate.sh
++# Shim for ACOS quality-gate.js (ported for portability)
++# Sources hook-env; passes stdin json through to node impl.
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++source "$SCRIPT_DIR/lib/hook-env.sh" 2>/dev/null || true
++
++log_hook_activation "quality-gate" "${HARNESS}" 2>/dev/null || true
++
++if [ -f "$SCRIPT_DIR/quality-gate.js" ]; then
++  cat | node "$SCRIPT_DIR/quality-gate.js"
++else
++  cat  # pass-through if no impl
++fi
+diff --git a/.claude/hooks/secret-guard.cjs b/.claude/hooks/secret-guard.cjs
+new file mode 100644
+index 0000000..86eafd6
+--- /dev/null
++++ b/.claude/hooks/secret-guard.cjs
+@@ -0,0 +1,76 @@
++#!/usr/bin/env node
++'use strict';
++
++const fs = require('fs');
++
++const MAX_STDIN = 1024 * 1024;
++
++function readStdin() {
++  const fd = 0;
++  const chunks = [];
++  let size = 0;
++  const buffer = Buffer.alloc(8192);
++
++  while (size < MAX_STDIN) {
++    let bytesRead = 0;
++    try {
++      bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null);
++    } catch {
++      break;
++    }
++    if (!bytesRead) break;
++    chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
++    size += bytesRead;
++  }
++
++  return Buffer.concat(chunks).toString('utf8');
++}
++
++function parsePayload(raw) {
++  try {
++    return JSON.parse(raw);
++  } catch {
++    return null;
++  }
++}
++
++function collectText(value, out = []) {
++  if (value == null) return out;
++  if (typeof value === 'string') {
++    out.push(value);
++    return out;
++  }
++  if (Array.isArray(value)) {
++    for (const item of value) collectText(item, out);
++    return out;
++  }
++  if (typeof value === 'object') {
++    for (const item of Object.values(value)) collectText(item, out);
++  }
++  return out;
++}
++
++const raw = readStdin();
++const payload = parsePayload(raw);
++const haystack = (payload ? collectText(payload).join('\n') : raw).slice(0, MAX_STDIN);
++
++const blockers = [
++  { name: 'private key block', re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
++  { name: 'OpenAI-style secret token', re: /\bsk-[A-Za-z0-9_-]{24,}\b/ },
++  { name: 'GitHub token', re: /\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{30,}\b/ },
++  { name: 'Slack token', re: /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/ },
++  { name: 'Stripe secret key', re: /\bsk_(live|test)_[A-Za-z0-9]{20,}\b/ },
++  { name: 'AWS access key', re: /\bAKIA[0-9A-Z]{16}\b/ },
++  { name: 'Google API key', re: /\bAIza[0-9A-Za-z_-]{35}\b/ },
++];
++
++const hit = blockers.find((rule) => rule.re.test(haystack));
++
++if (hit) {
++  console.error(`secret-guard blocked PreToolUse: ${hit.name}`);
++  console.error('Refusing to run a tool call that appears to contain a live secret value.');
++  process.exit(2);
++}
++
++process.exit(0);
++
+diff --git a/.claude/hooks/self-modify-gate.sh b/.claude/hooks/self-modify-gate.sh
+new file mode 100644
+index 0000000..ef3e98a
+--- /dev/null
++++ b/.claude/hooks/self-modify-gate.sh
+@@ -0,0 +1,268 @@
++#!/bin/bash
++# ══════════════════════════════════════════════════════════════
++# ACOS v10 Conservative Self-Modification Gate
++# ══════════════════════════════════════════════════════════════
++# Before any config/hook change:
++#   1. Snapshot current state (git stash or copy)
++#   2. Allow the change
++#   3. Validate intelligence score hasn't decreased
++#   4. If score drops: auto-revert and warn
++#
++# This prevents the system from degrading itself through
++# well-intentioned but harmful self-modifications.
++#
++# Usage:
++#   self-modify-gate.sh snapshot <file>   Save before-state
++#   self-modify-gate.sh validate <file>   Check after-state
++#   self-modify-gate.sh revert <file>     Restore snapshot
++#   self-modify-gate.sh score             Current intelligence score
++# ══════════════════════════════════════════════════════════════
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
++SNAPSHOT_DIR="$PROJECT_ROOT/.claude-flow/snapshots"
++LEARNING_HOOKS="$SCRIPT_DIR/learning-hooks.sh"
++AUDIT_SCRIPT="$SCRIPT_DIR/audit-trail.sh"
++METRICS_DIR="$PROJECT_ROOT/.claude-flow/metrics"
++
++mkdir -p "$SNAPSHOT_DIR" 2>/dev/null || true
++
++COMMAND="${1:-help}"
++shift || true
++
++# ── Get current intelligence score ────────────────────────────
++get_intelligence_score() {
++  python3 << 'PYEOF'
++import json, os
++
++metrics_dir = os.environ.get("METRICS_DIR", "")
++score = 0
++components = {}
++
++# 1. Pattern quality (0-25)
++patterns_file = os.path.join(metrics_dir, "..", ".claude", "trajectories", "patterns.json")
++try:
++    # Try alternative path
++    alt_patterns = os.path.join(os.path.dirname(metrics_dir), "..", ".claude", "trajectories", "patterns.json")
++    patterns_path = patterns_file if os.path.exists(patterns_file) else alt_patterns
++    if os.path.exists(patterns_path):
++        with open(patterns_path) as f:
++            patterns = json.load(f)
++        multi_count = len([p for p in patterns if p.get("count", 0) >= 2])
++        high_success = len([p for p in patterns if p.get("avgSuccess", 0) >= 0.8])
++        pattern_score = min(25, (multi_count * 0.3) + (high_success * 0.5))
++        components["patterns"] = round(pattern_score, 1)
++        score += pattern_score
++except:
++    components["patterns"] = 0
++
++# 2. Skill weights coverage (0-25)
++weights_file = os.path.join(metrics_dir, "skill-weights.json")
++try:
++    if os.path.exists(weights_file):
++        with open(weights_file) as f:
++            w = json.load(f)
++        domains = len(w.get("domains", {}))
++        total_tools = sum(len(d.get("tools", {})) for d in w.get("domains", {}).values())
++        weight_score = min(25, (domains * 2) + (total_tools * 0.2))
++        components["weights"] = round(weight_score, 1)
++        score += weight_score
++except:
++    components["weights"] = 0
++
++# 3. Trajectory data quality (0-25)
++traj_dir = os.path.join(os.path.dirname(metrics_dir), "..", ".claude", "trajectories")
++try:
++    alt_traj = os.path.join(os.path.dirname(metrics_dir), "..", ".claude", "trajectories")
++    traj_path = traj_dir if os.path.isdir(traj_dir) else alt_traj
++    if os.path.isdir(traj_path):
++        trajs = [f for f in os.listdir(traj_path) if f.endswith(".json") and f != "patterns.json"]
++        successes = 0
++        for fname in trajs:
++            try:
++                with open(os.path.join(traj_path, fname)) as f:
++                    t = json.load(f)
++                if float(t.get("successScore", 0)) >= 0.7:
++                    successes += 1
++            except:
++                continue
++        traj_score = min(25, (len(trajs) * 0.3) + (successes * 0.4))
++        components["trajectories"] = round(traj_score, 1)
++        score += traj_score
++except:
++    components["trajectories"] = 0
++
++# 4. Enhancement quality (0-25)
++enhance_file = os.path.join(metrics_dir, "enhancements.json")
++try:
++    if os.path.exists(enhance_file):
++        with open(enhance_file) as f:
++            e = json.load(f)
++        combos = len(e.get("winningCombos", []))
++        suggestions = len(e.get("suggestions", []))
++        enhance_score = min(25, (combos * 2) + (suggestions * 1))
++        components["enhancements"] = round(enhance_score, 1)
++        score += enhance_score
++except:
++    components["enhancements"] = 0
++
++print(json.dumps({"score": round(score), "components": components}))
++PYEOF
++}
++
++# ── Snapshot a file before modification ───────────────────────
++snapshot_file() {
++  local file="$1"
++
++  if [ ! -f "$file" ]; then
++    echo "[Self-Modify] File not found: $file"
++    exit 1
++  fi
++
++  # Generate snapshot ID
++  local snap_id="snap_$(date +%s)_$(basename "$file" | sed 's/[^a-zA-Z0-9.]/_/g')"
++  local snap_path="$SNAPSHOT_DIR/$snap_id"
++
++  # Save file content
++  cp "$file" "$snap_path" 2>/dev/null
++
++  # Save intelligence score at snapshot time
++  local score_data=$(METRICS_DIR="$METRICS_DIR" get_intelligence_score)
++  echo "$score_data" > "${snap_path}.score" 2>/dev/null
++
++  # Save metadata
++  python3 -c "
++import json, datetime
++meta = {
++    'id': '$snap_id',
++    'file': '''$file''',
++    'timestamp': datetime.datetime.now().isoformat(),
++    'score': $(echo "$score_data" | python3 -c "import json,sys; print(json.load(sys.stdin).get('score',0))" 2>/dev/null || echo 0)
++}
++with open('${snap_path}.meta', 'w') as f:
++    json.dump(meta, f, indent=2)
++" 2>/dev/null
++
++  # Log to audit
++  local current_score=$(echo "$score_data" | python3 -c "import json,sys; print(json.load(sys.stdin).get('score',0))" 2>/dev/null || echo 0)
++  [ -x "$AUDIT_SCRIPT" ] && bash "$AUDIT_SCRIPT" config "$file" "snapshot" "$snap_id" 2>/dev/null
++
++  echo "[Self-Modify] Snapshot created: $snap_id (score: $current_score/100)"
++  echo "$snap_id"
++}
++
++# ── Validate after modification ───────────────────────────────
++validate_change() {
++  local file="$1"
++  local snap_id="${2:-}"
++
++  # Find latest snapshot for this file if not specified
++  if [ -z "$snap_id" ]; then
++    snap_id=$(ls -t "$SNAPSHOT_DIR"/snap_*_$(basename "$file" | sed 's/[^a-zA-Z0-9.]/_/g').meta 2>/dev/null | head -1 | xargs basename 2>/dev/null | sed 's/.meta$//')
++  fi
++
++  if [ -z "$snap_id" ] || [ ! -f "$SNAPSHOT_DIR/${snap_id}.score" ]; then
++    echo "[Self-Modify] No snapshot found to validate against"
++    exit 0
++  fi
++
++  # Get before score
++  local before_score=$(cat "$SNAPSHOT_DIR/${snap_id}.score" | python3 -c "import json,sys; print(json.load(sys.stdin).get('score',0))" 2>/dev/null || echo 0)
++
++  # Get after score
++  local after_data=$(METRICS_DIR="$METRICS_DIR" get_intelligence_score)
++  local after_score=$(echo "$after_data" | python3 -c "import json,sys; print(json.load(sys.stdin).get('score',0))" 2>/dev/null || echo 0)
++
++  local delta=$((after_score - before_score))
++
++  [ -x "$AUDIT_SCRIPT" ] && bash "$AUDIT_SCRIPT" config "$file" "validate" "before=$before_score after=$after_score delta=$delta" 2>/dev/null
++
++  if [ "$delta" -lt -5 ]; then
++    echo "[Self-Modify] REGRESSION DETECTED: Score dropped $before_score → $after_score (delta: $delta)"
++    echo "[Self-Modify] Recommending revert. Run: self-modify-gate.sh revert $file $snap_id"
++
++    if [ "${ACOS_GATE_ENFORCE:-false}" = "true" ]; then
++      echo "[Self-Modify] AUTO-REVERTING: Restoring snapshot $snap_id"
++      cp "$SNAPSHOT_DIR/$snap_id" "$file" 2>/dev/null
++      echo "[Self-Modify] Reverted to pre-change state."
++      [ -x "$AUDIT_SCRIPT" ] && bash "$AUDIT_SCRIPT" config "$file" "auto_revert" "$snap_id" 2>/dev/null
++    fi
++    return 1
++  elif [ "$delta" -lt 0 ]; then
++    echo "[Self-Modify] Minor regression: $before_score → $after_score (delta: $delta). Within tolerance."
++    return 0
++  else
++    echo "[Self-Modify] Validated: Score $before_score → $after_score (delta: +$delta). Change is safe."
++    # Clean up old snapshots (keep last 10)
++    ls -t "$SNAPSHOT_DIR"/snap_* 2>/dev/null | tail -n +31 | xargs rm -f 2>/dev/null || true
++    return 0
++  fi
++}
++
++# ── Revert to snapshot ────────────────────────────────────────
++revert_to_snapshot() {
++  local file="$1"
++  local snap_id="$2"
++
++  if [ -z "$snap_id" ] || [ ! -f "$SNAPSHOT_DIR/$snap_id" ]; then
++    echo "[Self-Modify] Snapshot not found: $snap_id"
++    exit 1
++  fi
++
++  cp "$SNAPSHOT_DIR/$snap_id" "$file" 2>/dev/null
++  echo "[Self-Modify] Reverted $file to snapshot $snap_id"
++  [ -x "$AUDIT_SCRIPT" ] && bash "$AUDIT_SCRIPT" config "$file" "manual_revert" "$snap_id" 2>/dev/null
++}
++
++# ── Show current score ────────────────────────────────────────
++show_score() {
++  local data=$(METRICS_DIR="$METRICS_DIR" get_intelligence_score)
++  echo "=== ACOS Intelligence Score ==="
++  echo "$data" | python3 -c "
++import json, sys
++d = json.load(sys.stdin)
++print(f'  Total: {d[\"score\"]}/100')
++print()
++for k, v in d.get('components', {}).items():
++    bar = '█' * int(v) + '░' * (25 - int(v))
++    print(f'  {k:15} {bar} {v}/25')
++" 2>/dev/null
++}
++
++# ── List snapshots ────────────────────────────────────────────
++list_snapshots() {
++  echo "=== Self-Modification Snapshots ==="
++  for meta in "$SNAPSHOT_DIR"/*.meta; do
++    [ -f "$meta" ] || continue
++    python3 -c "
++import json
++try:
++    with open('$meta') as f:
++        m = json.load(f)
++    print(f'  {m[\"id\"]} | score={m.get(\"score\",\"?\")} | {m.get(\"timestamp\",\"\")[:19]} | {m[\"file\"].split(\"/\")[-1]}')
++except: pass
++" 2>/dev/null
++  done
++}
++
++# ── Main ──────────────────────────────────────────────────────
++case "$COMMAND" in
++  "snapshot"|"save")   snapshot_file "$@" ;;
++  "validate"|"check")  validate_change "$@" ;;
++  "revert"|"restore")  revert_to_snapshot "$@" ;;
++  "score")             show_score ;;
++  "list"|"snapshots")  list_snapshots ;;
++  "help"|"-h"|"--help")
++    echo "ACOS v10 Conservative Self-Modification Gate"
++    echo ""
++    echo "Commands:"
++    echo "  snapshot <file>             Save before-state + intelligence score"
++    echo "  validate <file> [snap_id]   Check score didn't regress after change"
++    echo "  revert <file> <snap_id>     Restore file from snapshot"
++    echo "  score                       Show current intelligence score"
++    echo "  list                        Show all snapshots"
++    echo ""
++    echo "Auto-revert: When ACOS_GATE_ENFORCE=true and score drops >5 points"
++    ;;
++  *) echo "Unknown: $COMMAND" >&2; exit 1 ;;
++esac
+diff --git a/.claude/hooks/session-end-log.sh b/.claude/hooks/session-end-log.sh
+new file mode 100644
+index 0000000..af7fc0a
+--- /dev/null
++++ b/.claude/hooks/session-end-log.sh
+@@ -0,0 +1,30 @@
++#!/bin/bash
++# Auto-log session to global AI sessions file
++# Triggered at end of significant Claude Code sessions
++
++GLOBAL_LOG="/mnt/c/Users/Frank/docs/AI_GLOBAL_SESSIONS.md"
++TIMESTAMP=$(date '+%Y-%m-%d %H:%M')
++PROJECT="FrankX"
++
++# Get the session summary from environment or stdin
++SESSION_SUMMARY="${1:-Unspecified session work}"
++
++# Append to global log
++cat >> "$GLOBAL_LOG" << EOF
++
++---
++
++## SESSION: ${PROJECT} - Auto-logged Session
++**Project**: ${PROJECT}
++**Date**: ${TIMESTAMP}
++**Agent**: Claude Code (Hook)
++
++### Summary
++${SESSION_SUMMARY}
++
++### Auto-logged by
++Session end hook at ${TIMESTAMP}
++
++EOF
++
++echo "Session logged to ${GLOBAL_LOG}"
+diff --git a/.claude/hooks/session-logger.sh b/.claude/hooks/session-logger.sh
+new file mode 100644
+index 0000000..c9fc970
+--- /dev/null
++++ b/.claude/hooks/session-logger.sh
+@@ -0,0 +1,51 @@
++#!/bin/bash
++# session-logger.sh
++# Portable/multi-harness session logger (claude/codex/gemini/agy/grok)
++# Sources hook-env for portable paths + harness detect. Agnostic.
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++source "$SCRIPT_DIR/lib/hook-env.sh" 2>/dev/null || true
++
++TIMESTAMP=$(date '+%Y-%m-%d %H:%M')
++
++# Use portable from env (or fallback)
++GLOBAL_LOG="${AI_SESSIONS_LOG:-$HOME/docs/AI_GLOBAL_SESSIONS.md}"
++PROJECT="${PROJECT_NAME:-$(basename "$(pwd)")}"
++
++# Get session context - agnostic to harness envs
++SESSION_HOOK_TYPE="${CLAUDE_HOOK_TYPE:-${CODEX_HOOK_TYPE:-${GROK_HOOK_TYPE:-manual}}}"
++SESSION_INPUT="${CLAUDE_PROMPT:-${CODEX_PROMPT:-${GROK_PROMPT:-No prompt captured}}}"
++
++# Harness label for log
++AGENT_LABEL="${HARNESS:-unknown}"
++case "$HARNESS" in
++  claude) AGENT_LABEL="Claude Code" ;;
++  codex) AGENT_LABEL="Codex CLI" ;;
++  gemini) AGENT_LABEL="Gemini CLI" ;;
++  agy) AGENT_LABEL="Antigravity/AGY" ;;
++  grok) AGENT_LABEL="Grok CLI" ;;
++esac
++
++# Create session entry (portable)
++cat >> "$GLOBAL_LOG" << EOF
++
++---
++
++## SESSION: ${PROJECT} - ${SESSION_HOOK_TYPE}
++**Project**: ${PROJECT}
++**Date**: ${TIMESTAMP}
++**Agent**: ${AGENT_LABEL} (harness: ${HARNESS})
++**Hook**: ${SESSION_HOOK_TYPE}
++
++### User Prompt
++${SESSION_INPUT}
++
++### Auto-logged
++This entry was automatically captured by the session-logger hook (via hook-env.sh for portability).
++
++EOF
++
++log_hook_activation "session-logger" "${SESSION_HOOK_TYPE}" 2>/dev/null || true
++
++# Return success message
++echo "Session captured to global log (harness=${HARNESS})"
+diff --git a/.claude/hooks/session-start.js b/.claude/hooks/session-start.js
+new file mode 100644
+index 0000000..3a3d3ca
+--- /dev/null
++++ b/.claude/hooks/session-start.js
+@@ -0,0 +1,152 @@
++#!/usr/bin/env node
++'use strict';
++
++/**
++ * ACOS Session Start Hook
++ * - Creates active trajectory for the session
++ * - Checks reasoning bank for similar past trajectories
++ * - Returns context with suggestions and skill profile hints
++ */
++
++const fs = require('fs');
++const path = require('path');
++
++const TRAJ_DIR = path.join(__dirname, '..', 'trajectories');
++const ACTIVE_META = path.join(TRAJ_DIR, '_active.json');
++const ACTIVE_OPS = path.join(TRAJ_DIR, '_operations.jsonl');
++const PROFILES_DIR = path.join(__dirname, '..', 'skills', 'profiles');
++
++function ensureDir(dir) {
++  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
++}
++
++function loadCompletedTrajectories(limit = 20) {
++  ensureDir(TRAJ_DIR);
++  return fs.readdirSync(TRAJ_DIR)
++    .filter(f => f.endsWith('.json') && !f.startsWith('_') && f !== 'patterns.json')
++    .slice(-limit)
++    .map(f => {
++      try { return JSON.parse(fs.readFileSync(path.join(TRAJ_DIR, f), 'utf-8')); }
++      catch { return null; }
++    })
++    .filter(Boolean);
++}
++
++function loadPatterns() {
++  const pf = path.join(TRAJ_DIR, 'patterns.json');
++  if (!fs.existsSync(pf)) return [];
++  try { return JSON.parse(fs.readFileSync(pf, 'utf-8')); }
++  catch { return []; }
++}
++
++function getRecentStats(trajectories) {
++  if (trajectories.length === 0) return null;
++  const recent = trajectories.slice(-10);
++  const avgSuccess = recent.reduce((s, t) => s + (t.successScore || 0), 0) / recent.length;
++  const types = {};
++  recent.forEach(t => {
++    const type = t.type || 'unknown';
++    if (!types[type]) types[type] = 0;
++    types[type]++;
++  });
++  return {
++    total: trajectories.length,
++    recentAvgSuccess: (avgSuccess * 100).toFixed(0),
++    topTypes: Object.entries(types).sort((a, b) => b[1] - a[1]).slice(0, 3)
++  };
++}
++
++function getActiveProfiles() {
++  if (!fs.existsSync(PROFILES_DIR)) return [];
++  return fs.readdirSync(PROFILES_DIR)
++    .filter(f => f.endsWith('.json'))
++    .map(f => {
++      try {
++        const d = JSON.parse(fs.readFileSync(path.join(PROFILES_DIR, f), 'utf-8'));
++        return d.name || f.replace('.json', '');
++      } catch { return null; }
++    })
++    .filter(Boolean);
++}
++
++function main() {
++  try {
++    const input = JSON.parse(fs.readFileSync(0, 'utf-8'));
++    const sessionId = input.session_id || `session_${Date.now()}`;
++    const source = input.source || 'startup';
++
++    ensureDir(TRAJ_DIR);
++
++    // Create active trajectory
++    const trajectory = {
++      id: `traj_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
++      sessionId,
++      source,
++      startedAt: new Date().toISOString(),
++      promptCount: 0,
++      toolCount: 0,
++      filesModified: [],
++      type: 'auto',
++      task: null // Set from first meaningful prompt
++    };
++
++    fs.writeFileSync(ACTIVE_META, JSON.stringify(trajectory, null, 2));
++    // Clear operations log
++    fs.writeFileSync(ACTIVE_OPS, '');
++
++    // Build context
++    const ctx = [];
++    const trajectories = loadCompletedTrajectories();
++    const patterns = loadPatterns();
++    const stats = getRecentStats(trajectories);
++    const profiles = getActiveProfiles();
++
++    if (source === 'startup') {
++      ctx.push(`You are in 'explanatory' output style mode, where you should provide educational insights about the codebase as you help with the user's task.`);
++      ctx.push('');
++      ctx.push(`You should be clear and educational, providing helpful explanations while remaining focused on the task. Balance educational content with task completion. When providing insights, you may exceed typical length constraints, but remain focused and relevant.`);
++      ctx.push('');
++      ctx.push('## Insights');
++      ctx.push('In order to encourage learning, before and after writing code, always provide brief educational explanations about implementation choices using (with backticks):');
++      ctx.push('"\`\u2605 Insight \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\`');
++      ctx.push('[2-3 key educational points]');
++      ctx.push('`\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`"');
++      ctx.push('');
++      ctx.push('These insights should be included in the conversation, not in the codebase. You should generally focus on interesting insights that are specific to the codebase or the code you just wrote, rather than general programming concepts. Do not wait until the end to provide insights. Provide them as you write code.');
++    }
++
++    // Add trajectory learning context
++    const projectName = path.basename(process.env.CLAUDE_PROJECT_DIR || 'unknown');
++    ctx.push(`# [${projectName}] recent context, ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`);
++    ctx.push('');
++
++    if (stats) {
++      ctx.push(`ACOS Learning: ${stats.total} past trajectories, ${stats.recentAvgSuccess}% avg success.`);
++      if (stats.topTypes.length > 0) {
++        ctx.push(`Recent work: ${stats.topTypes.map(([t, c]) => `${t}(${c})`).join(', ')}`);
++      }
++    } else {
++      ctx.push('No previous sessions found for this project yet.');
++    }
++
++    if (patterns.length > 0) {
++      const top = patterns.sort((a, b) => (b.avgSuccess || 0) - (a.avgSuccess || 0)).slice(0, 3);
++      ctx.push(`\nTop patterns: ${top.map(p => `"${p.sequence}" (${(p.avgSuccess * 100).toFixed(0)}% success, ${p.count}x)`).join('; ')}`);
++    }
++
++    const output = {
++      hookSpecificOutput: {
++        hookEventName: 'SessionStart',
++        additionalContext: ctx.join('\n')
++      }
++    };
++
++    console.log(JSON.stringify(output));
++    process.exit(0);
++  } catch (err) {
++    // Silent fail - don't break session
++    process.exit(0);
++  }
++}
++
++main();
+diff --git a/.claude/hooks/skill-activation-prompt.js b/.claude/hooks/skill-activation-prompt.js
+new file mode 100644
+index 0000000..2372e0a
+--- /dev/null
++++ b/.claude/hooks/skill-activation-prompt.js
+@@ -0,0 +1,252 @@
++#!/usr/bin/env node
++'use strict';
++
++const fs = require('fs');
++const path = require('path');
++
++const MAX_CACHE = 100;
++const PATTERN_TTL = 60000;
++const RULES_TTL = 30000;
++
++const patternCache = new Map();
++const rulesCache = new Map();
++
++const EARLY_EXITS = [/^(help|version|list|status|quit|exit|clear)$/i, /^\s*$/];
++const PRIORITY = { critical: 0, high: 1, medium: 2, low: 3 };
++
++function getCachedPattern(regexStr) {
++    const now = Date.now();
++    const entry = patternCache.get(regexStr);
++
++    if (entry && (now - entry.created) < PATTERN_TTL) {
++        patternCache.delete(regexStr);
++        patternCache.set(regexStr, entry);
++        return entry.regex;
++    }
++
++    try {
++        const regex = new RegExp(regexStr, 'i');
++        if (patternCache.size >= MAX_CACHE) {
++            patternCache.delete(patternCache.keys().next().value);
++        }
++        patternCache.set(regexStr, { regex, created: now });
++        return regex;
++    } catch {
++        return null;
++    }
++}
++
++function getCachedRules(rulesPath) {
++    const now = Date.now();
++    const entry = rulesCache.get(rulesPath);
++
++    if (entry && (now - entry.created) < RULES_TTL) {
++        return entry.rules;
++    }
++
++    try {
++        if (!fs.existsSync(rulesPath)) return null;
++        const rules = JSON.parse(fs.readFileSync(rulesPath, 'utf-8'));
++        rulesCache.set(rulesPath, { rules, created: now });
++        return rules;
++    } catch {
++        return null;
++    }
++}
++
++function isEarlyExit(prompt) {
++    const t = prompt.trim();
++    if (t.length === 0) return true;
++    if (t.length < 15) return EARLY_EXITS.some(r => r.test(t));
++    return false;
++}
++
++function kwToRegex(kw) {
++    return '\\b' + kw.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b';
++}
++
++function globToRegex(p) {
++    return p.replace(/\*\*/g, '.*').replace(/\*/g, '[^/]*').replace(/\?/g, '.');
++}
++
++function findMatches(rules, prompt, currentFile, isAgent) {
++    const matches = [];
++    const target = isAgent ? rules.agents : rules.skills;
++    if (!target) return matches;
++
++    for (const [name, config] of Object.entries(target)) {
++        const trig = config.promptTriggers;
++        if (!trig) continue;
++
++        if (trig.keywords) {
++            for (const kw of trig.keywords) {
++                if (getCachedPattern(kwToRegex(kw))?.test(prompt)) {
++                    matches.push({ name, matchType: 'keyword', config, priority: config.priority });
++                    break;
++                }
++            }
++            continue;
++        }
++
++        if (trig.intentPatterns) {
++            for (const pat of trig.intentPatterns) {
++                if (getCachedPattern(pat)?.test(prompt)) {
++                    matches.push({ name, matchType: 'intent', config, priority: config.priority });
++                    break;
++                }
++            }
++        }
++
++        if (!isAgent && config.fileTriggers?.pathPatterns && currentFile) {
++            for (const pat of config.fileTriggers.pathPatterns) {
++                if (getCachedPattern(globToRegex(pat))?.test(currentFile)) {
++                    matches.push({ name, matchType: 'file', config, priority: config.priority });
++                    break;
++                }
++            }
++        }
++    }
++
++    return matches;
++}
++
++function buildOutput(skills, agents) {
++    if (skills.length === 0 && agents.length === 0) return null;
++
++    const sortBy = (a, b) => PRIORITY[a.priority] - PRIORITY[b.priority];
++
++    const mustSkills = [...skills.filter(s => s.priority === 'critical'),
++                        ...skills.filter(s => s.priority === 'high')].sort(sortBy);
++    const mustAgents = [...agents.filter(a => a.priority === 'critical'),
++                        ...agents.filter(a => a.priority === 'high')].sort(sortBy);
++    const suggestSkills = [...skills.filter(s => s.priority === 'medium'),
++                          ...skills.filter(s => s.priority === 'low')].sort(sortBy);
++    const suggestAgents = [...agents.filter(a => a.priority === 'medium'),
++                          ...agents.filter(a => a.priority === 'low')].sort(sortBy);
++
++    const ctx = [];
++
++    if (mustSkills.length > 0 || mustAgents.length > 0) {
++        ctx.push('IMPORTANT GUIDELINES:\n');
++        if (mustSkills.length > 0) {
++            const name = mustSkills[0].name.replace(/-/g, ' ');
++            const others = mustSkills.slice(1).map(s => s.name.replace(/-/g, ' '));
++            ctx.push(`The "${name}" skill contains critical best practices.`);
++            ctx.push('Review guidelines for: patterns, approach, quality');
++            if (others.length > 0) ctx.push(`Also: ${others.join(', ')}`);
++            ctx.push('');
++        }
++        if (mustAgents.length > 0) {
++            const name = mustAgents[0].name.replace(/-/g, ' ');
++            const desc = mustAgents[0].config.description;
++            ctx.push('RECOMMENDED: Use "' + name + '" subagent');
++            if (desc) ctx.push('Specialty: ' + desc);
++            ctx.push('Say: "Use ' + name + ' subagent"');
++            ctx.push('');
++        }
++    }
++
++    if (suggestSkills.length > 0 || suggestAgents.length > 0) {
++        ctx.push(mustSkills.length || mustAgents.length ? 'SUGGESTIONS:\n' : 'SUGGESTED:\n');
++        if (suggestSkills.length) {
++            ctx.push('- Skills: ' + suggestSkills.map(s => s.name.replace(/-/g, ' ')).join(', '));
++        }
++        if (suggestAgents.length) {
++            ctx.push('- Agents: ' + suggestAgents.map(a => a.name.replace(/-/g, ' ')).join(', '));
++        }
++    }
++
++    return { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: ctx.join('\n') } };
++}
++
++function updateActiveTrajectory(prompt) {
++    // Update active trajectory with prompt count and task detection
++    const trajDir = path.join(process.env.CLAUDE_PROJECT_DIR || process.env.PROJECT_ROOT || path.join(__dirname, '..', '..'),
++                              '.claude', 'trajectories');
++    const metaPath = path.join(trajDir, '_active.json');
++    try {
++        if (!fs.existsSync(metaPath)) return null;
++        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
++        meta.promptCount = (meta.promptCount || 0) + 1;
++        // Set task from first meaningful prompt
++        if (!meta.task && prompt.length > 10) {
++            meta.task = prompt.slice(0, 200);
++        }
++        fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
++        return meta;
++    } catch { return null; }
++}
++
++function getTrajectoryHint(prompt) {
++    // Check reasoning bank for similar past work
++    const trajDir = path.join(process.env.CLAUDE_PROJECT_DIR || process.env.PROJECT_ROOT || path.join(__dirname, '..', '..'),
++                              '.claude', 'trajectories');
++    try {
++        if (!fs.existsSync(trajDir)) return null;
++        const files = fs.readdirSync(trajDir)
++            .filter(f => f.endsWith('.json') && !f.startsWith('_') && f !== 'patterns.json');
++        if (files.length === 0) return null;
++
++        const promptWords = new Set(prompt.toLowerCase().split(/\s+/).filter(w => w.length > 3));
++        if (promptWords.size < 2) return null;
++
++        let bestMatch = null;
++        let bestScore = 0;
++
++        for (const f of files.slice(-30)) {
++            try {
++                const traj = JSON.parse(fs.readFileSync(path.join(trajDir, f), 'utf-8'));
++                if (!traj.task) continue;
++                const taskWords = new Set(traj.task.toLowerCase().split(/\s+/).filter(w => w.length > 3));
++                const overlap = [...promptWords].filter(w => taskWords.has(w)).length;
++                const score = overlap / Math.max(promptWords.size, taskWords.size);
++                if (score > bestScore && score > 0.25) {
++                    bestScore = score;
++                    bestMatch = traj;
++                }
++            } catch { continue; }
++        }
++
++        if (bestMatch) {
++            return `Trajectory hint: Similar past work "${bestMatch.task?.slice(0, 80)}" scored ${(bestMatch.successScore * 100).toFixed(0)}% success (${bestMatch.operationCount || '?'} ops, type: ${bestMatch.type})`;
++        }
++    } catch { /* silent */ }
++    return null;
++}
++
++function main() {
++    try {
++        const data = JSON.parse(fs.readFileSync(0, 'utf-8'));
++        if (isEarlyExit(data.prompt.toLowerCase())) process.exit(0);
++
++        // Update active trajectory
++        updateActiveTrajectory(data.prompt);
++
++        const rulesPath = path.join(process.env.CLAUDE_PROJECT_DIR || process.env.PROJECT_ROOT || process.env.GLOBAL_SKILLS_DIR || path.join(__dirname, '..', '..'),
++                                   '.claude', 'skills', 'skill-rules.json');
++        const rules = getCachedRules(rulesPath);
++        if (!rules) process.exit(0);
++
++        const skills = findMatches(rules, data.prompt.toLowerCase(), data.cwd || '', false);
++        const agents = findMatches(rules, data.prompt.toLowerCase(), null, true);
++
++        const out = buildOutput(skills, agents);
++
++        // Add trajectory hint if available
++        const hint = getTrajectoryHint(data.prompt);
++
++        if (out || hint) {
++            const result = out || { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: '' } };
++            if (hint) {
++                const existing = result.hookSpecificOutput.additionalContext || '';
++                result.hookSpecificOutput.additionalContext = (existing ? existing + '\n\n' : '') + hint;
++            }
++            console.log(JSON.stringify(result));
++        }
++        process.exit(0);
++    } catch {
++        process.exit(0);
++    }
++}
++
++main();
+\ No newline at end of file
+diff --git a/.claude/hooks/skill-activation-prompt.sh b/.claude/hooks/skill-activation-prompt.sh
+new file mode 100644
+index 0000000..f40d6bd
+--- /dev/null
++++ b/.claude/hooks/skill-activation-prompt.sh
+@@ -0,0 +1,19 @@
++#!/bin/bash
++# skill-activation-prompt.sh
++# Portable launcher for skill-activation (sources hook-env for multi-harness paths)
++# Updated for new env; delegates to .js (node) or .ts
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++source "$SCRIPT_DIR/lib/hook-env.sh" 2>/dev/null || true
++
++log_hook_activation "skill-activation" "UserPromptSubmit" 2>/dev/null || true
++
++# Use global hooks directory (portable)
++cd "${GLOBAL_HOOKS_DIR:-$HOME/.claude/hooks}"
++
++# Use pre-compiled JS for speed (or tsx for dev)
++if [ -f "skill-activation-prompt.js" ]; then
++  cat | node skill-activation-prompt.js
++else
++  cat | npx tsx skill-activation-prompt.ts 2>/dev/null || cat | node skill-activation-prompt.js
++fi
+diff --git a/.claude/hooks/skill-activation-prompt.ts b/.claude/hooks/skill-activation-prompt.ts
+new file mode 100644
+index 0000000..2ab6482
+--- /dev/null
++++ b/.claude/hooks/skill-activation-prompt.ts
+@@ -0,0 +1,304 @@
++#!/usr/bin/env npx tsx
++/**
++ * ACOS v6.1 Skill Activation Hook
++ *
++ * Source: diet103/claude-code-infrastructure-showcase pattern
++ * Implements: Confidence scoring, model routing, enforcement types
++ *
++ * Runs on UserPromptSubmit to detect and suggest relevant skills
++ */
++
++import * as readline from 'readline';
++
++// Scoring weights (from claude-flow & diet103 patterns)
++const SCORING_WEIGHTS = {
++  keyword: 2,
++  keywordPattern: 3,
++  pathPattern: 4,
++  directoryMatch: 5,
++  intentPattern: 4,
++  contentPattern: 5,
++  commandTrigger: 6
++};
++
++// Confidence threshold for activation
++const CONFIDENCE_THRESHOLD = 4;
++
++// Model routing configuration
++const MODEL_ROUTING = {
++  haiku_keywords: ['status', 'check', 'list', 'deploy', 'format', 'lint'],
++  haiku_commands: ['/mcp-status', '/inventory-status', '/nextjs-deploy', '/publish'],
++  sonnet_keywords: ['write', 'create', 'implement', 'fix', 'build', 'test', 'article', 'music'],
++  opus_keywords: ['architect', 'design', 'strategy', 'council', 'enterprise', 'complex', 'research', 'plan']
++};
++
++// Skill definitions with triggers
++interface SkillDefinition {
++  name: string;
++  priority: 'critical' | 'high' | 'medium' | 'low';
++  model: 'haiku' | 'sonnet' | 'opus' | 'inherit';
++  keywords: string[];
++  intentPatterns: RegExp[];
++  commandTriggers: string[];
++  enforcement: 'always' | 'block' | 'warn' | 'suggest';
++}
++
++const SKILLS: SkillDefinition[] = [
++  {
++    name: 'model-routing',
++    priority: 'critical',
++    model: 'inherit',
++    keywords: ['model', 'routing', 'cost', 'optimize', 'haiku', 'sonnet', 'opus'],
++    intentPatterns: [/(which|what).*model/, /(optimize|reduce).*cost/],
++    commandTriggers: [],
++    enforcement: 'always'
++  },
++  {
++    name: 'suno-ai-mastery',
++    priority: 'high',
++    model: 'sonnet',
++    keywords: ['music', 'suno', 'track', 'song', 'lyrics', 'melody', 'beat', 'frequency', 'hz', 'audio'],
++    intentPatterns: [/(create|make|produce|write).*(music|song|track)/, /(generate|craft).*lyrics/],
++    commandTriggers: ['/create-music'],
++    enforcement: 'suggest'
++  },
++  {
++    name: 'content-strategy',
++    priority: 'high',
++    model: 'sonnet',
++    keywords: ['blog', 'article', 'content', 'post', 'newsletter', 'seo', 'publish'],
++    intentPatterns: [/(write|create|draft).*(blog|article|post)/, /(plan|strategy).*content/],
++    commandTriggers: ['/article-creator', '/factory', '/publish'],
++    enforcement: 'suggest'
++  },
++  {
++    name: 'starlight-architecture',
++    priority: 'critical',
++    model: 'opus',
++    keywords: ['architect', 'enterprise', 'system design', 'oracle', 'infrastructure', 'multi-agent'],
++    intentPatterns: [/(design|architect|plan).*(system|architecture|infrastructure)/, /enterprise.*ai/i],
++    commandTriggers: ['/starlight-architect'],
++    enforcement: 'warn'
++  },
++  {
++    name: 'council-deliberation',
++    priority: 'critical',
++    model: 'opus',
++    keywords: ['council', 'deliberate', 'perspectives', 'should i', 'decision', 'strategy'],
++    intentPatterns: [/(should|what|how).*(i|we).*(do|choose|decide)/, /multiple.*perspectives/],
++    commandTriggers: ['/council'],
++    enforcement: 'suggest'
++  },
++  {
++    name: 'nextjs-react-expert',
++    priority: 'high',
++    model: 'sonnet',
++    keywords: ['nextjs', 'react', 'component', 'page', 'route', 'server component', 'app router'],
++    intentPatterns: [/(create|build|implement).*(component|page|route)/, /next.*js/i],
++    commandTriggers: ['/nextjs-deploy', '/spec'],
++    enforcement: 'suggest'
++  },
++  {
++    name: 'spec-driven-development',
++    priority: 'high',
++    model: 'sonnet',
++    keywords: ['spec', 'requirements', 'design doc', 'implementation plan', 'feature'],
++    intentPatterns: [/(implement|build|create).*feature/, /(plan|design).*implementation/],
++    commandTriggers: ['/spec'],
++    enforcement: 'suggest'
++  },
++  {
++    name: 'planning-with-files',
++    priority: 'high',
++    model: 'sonnet',
++    keywords: ['plan', 'task', 'breakdown', 'implement', 'complex task', 'multi-step'],
++    intentPatterns: [/(plan|break.*down|organize).*task/, /complex.*implementation/],
++    commandTriggers: ['/planning-with-files'],
++    enforcement: 'suggest'
++  },
++  {
++    name: 'security-auditor',
++    priority: 'critical',
++    model: 'sonnet',
++    keywords: ['security', 'vulnerability', 'owasp', 'audit', 'penetration', 'cve', 'credential'],
++    intentPatterns: [/(check|scan|audit).*security/, /(find|detect).*vulnerabilit/],
++    commandTriggers: [],
++    enforcement: 'warn'
++  },
++  {
++    name: 'agentic-orchestration',
++    priority: 'high',
++    model: 'opus',
++    keywords: ['swarm', 'multi-agent', 'orchestrate', 'coordinate', 'parallel agents', 'ultrawork', 'consensus'],
++    intentPatterns: [/(coordinate|orchestrate).*agent/, /multi.*agent/, /parallel.*execution/],
++    commandTriggers: ['/council', '/starlight-intelligence'],
++    enforcement: 'suggest'
++  },
++  {
++    name: 'ui-ux-design-expert',
++    priority: 'medium',
++    model: 'sonnet',
++    keywords: ['design', 'ux', 'ui', 'interface', 'component', 'layout', 'responsive', 'accessibility'],
++    intentPatterns: [/(design|create|improve).*interface/, /(ux|ui).*pattern/i],
++    commandTriggers: ['/ux-design'],
++    enforcement: 'suggest'
++  },
++  {
++    name: 'excellence-book-writing',
++    priority: 'medium',
++    model: 'opus',
++    keywords: ['book', 'chapter', 'manuscript', 'novel', 'narrative', 'character'],
++    intentPatterns: [/(write|create|draft).*(book|chapter|novel)/, /character.*development/],
++    commandTriggers: ['/author-team'],
++    enforcement: 'suggest'
++  },
++  {
++    name: 'social-media-strategy',
++    priority: 'medium',
++    model: 'sonnet',
++    keywords: ['social', 'linkedin', 'twitter', 'instagram', 'farcaster', 'thread'],
++    intentPatterns: [/(create|write|generate).*social/, /(post|share).*linkedin/],
++    commandTriggers: ['/generate-social'],
++    enforcement: 'suggest'
++  },
++  {
++    name: 'mcp-architecture',
++    priority: 'medium',
++    model: 'sonnet',
++    keywords: ['mcp', 'model context protocol', 'mcp server', 'tool integration'],
++    intentPatterns: [/(create|build|implement).*mcp/i, /model.*context.*protocol/i],
++    commandTriggers: ['/mcp-status', '/automation-dev'],
++    enforcement: 'suggest'
++  }
++];
++
++interface SkillMatch {
++  skill: SkillDefinition;
++  score: number;
++  matchedKeywords: string[];
++  matchedPatterns: string[];
++}
++
++function calculateSkillScore(prompt: string, skill: SkillDefinition): SkillMatch {
++  const promptLower = prompt.toLowerCase();
++  let score = 0;
++  const matchedKeywords: string[] = [];
++  const matchedPatterns: string[] = [];
++
++  // Check keywords
++  for (const keyword of skill.keywords) {
++    if (promptLower.includes(keyword.toLowerCase())) {
++      score += SCORING_WEIGHTS.keyword;
++      matchedKeywords.push(keyword);
++    }
++  }
++
++  // Check intent patterns
++  for (const pattern of skill.intentPatterns) {
++    if (pattern.test(promptLower)) {
++      score += SCORING_WEIGHTS.intentPattern;
++      matchedPatterns.push(pattern.toString());
++    }
++  }
++
++  // Check command triggers
++  for (const command of skill.commandTriggers) {
++    if (promptLower.includes(command)) {
++      score += SCORING_WEIGHTS.commandTrigger;
++      matchedKeywords.push(command);
++    }
++  }
++
++  // Always-active skills get boosted
++  if (skill.enforcement === 'always') {
++    score += 10;
++  }
++
++  return { skill, score, matchedKeywords, matchedPatterns };
++}
++
++function determineRecommendedModel(matches: SkillMatch[]): 'haiku' | 'sonnet' | 'opus' {
++  // Check if any critical/high priority match requires opus
++  for (const match of matches) {
++    if (match.score >= CONFIDENCE_THRESHOLD && match.skill.model === 'opus') {
++      return 'opus';
++    }
++  }
++
++  // Check if any match requires sonnet
++  for (const match of matches) {
++    if (match.score >= CONFIDENCE_THRESHOLD && match.skill.model === 'sonnet') {
++      return 'sonnet';
++    }
++  }
++
++  return 'sonnet'; // Default
++}
++
++function formatOutput(matches: SkillMatch[], recommendedModel: string): string {
++  const lines: string[] = [];
++
++  // Group by priority
++  const critical = matches.filter(m => m.score >= CONFIDENCE_THRESHOLD && m.skill.priority === 'critical');
++  const high = matches.filter(m => m.score >= CONFIDENCE_THRESHOLD && m.skill.priority === 'high');
++  const medium = matches.filter(m => m.score >= CONFIDENCE_THRESHOLD && m.skill.priority === 'medium');
++
++  lines.push('SKILL SUGGESTIONS:');
++  lines.push('');
++
++  if (critical.length > 0) {
++    for (const match of critical.slice(0, 2)) {
++      const enforcement = match.skill.enforcement === 'warn' ? 'WARNING' : 'CRITICAL';
++      lines.push(`${enforcement}: ${match.skill.name} (score: ${match.score}, model: ${match.skill.model})`);
++    }
++  }
++
++  if (high.length > 0) {
++    for (const match of high.slice(0, 2)) {
++      lines.push(`Consider: ${match.skill.name}`);
++    }
++  }
++
++  if (critical.length === 0 && high.length === 0 && medium.length > 0) {
++    for (const match of medium.slice(0, 2)) {
++      lines.push(`Consider: ${match.skill.name}`);
++    }
++  }
++
++  return lines.join('\n');
++}
++
++async function main() {
++  // Read prompt from stdin
++  const rl = readline.createInterface({
++    input: process.stdin,
++    output: process.stdout,
++    terminal: false
++  });
++
++  let prompt = '';
++
++  for await (const line of rl) {
++    prompt += line + '\n';
++  }
++
++  prompt = prompt.trim();
++
++  if (!prompt) {
++    console.log('SKILL SUGGESTIONS:\n\nConsider: dev');
++    return;
++  }
++
++  // Calculate scores for all skills
++  const matches = SKILLS.map(skill => calculateSkillScore(prompt, skill))
++    .filter(match => match.score > 0)
++    .sort((a, b) => b.score - a.score);
++
++  // Determine recommended model
++  const recommendedModel = determineRecommendedModel(matches);
++
++  // Output suggestions
++  console.log(formatOutput(matches, recommendedModel));
++}
++
++main().catch(console.error);
+diff --git a/.claude/hooks/stop-finalize.js b/.claude/hooks/stop-finalize.js
+new file mode 100644
+index 0000000..104e2ba
+--- /dev/null
++++ b/.claude/hooks/stop-finalize.js
+@@ -0,0 +1,175 @@
++#!/usr/bin/env node
++'use strict';
++
++/**
++ * ACOS Stop Hook
++ * - Finalizes active trajectory
++ * - Auto-calculates success score from operations
++ * - Extracts patterns from operation sequences
++ * - Saves to trajectories/ for reasoning bank
++ */
++
++const fs = require('fs');
++const path = require('path');
++
++const TRAJ_DIR = path.join(__dirname, '..', 'trajectories');
++const ACTIVE_META = path.join(TRAJ_DIR, '_active.json');
++const ACTIVE_OPS = path.join(TRAJ_DIR, '_operations.jsonl');
++const PATTERNS_FILE = path.join(TRAJ_DIR, 'patterns.json');
++
++function loadOperations() {
++  if (!fs.existsSync(ACTIVE_OPS)) return [];
++  const lines = fs.readFileSync(ACTIVE_OPS, 'utf-8').trim().split('\n').filter(Boolean);
++  return lines.map(l => {
++    try { return JSON.parse(l); } catch { return null; }
++  }).filter(Boolean);
++}
++
++function detectType(meta, ops) {
++  const tools = ops.map(o => o.t);
++  const files = (meta.filesModified || []).join(' ').toLowerCase();
++  const cmds = ops.filter(o => o.c).map(o => o.c).join(' ').toLowerCase();
++
++  if (cmds.includes('git push') || cmds.includes('git commit')) return 'deployment';
++  if (files.includes('content/blog') || files.includes('.mdx')) return 'content_creation';
++  if (files.includes('app/') || files.includes('components/')) return 'code_development';
++  if (cmds.includes('suno') || files.includes('music')) return 'music_production';
++  if (files.includes('.claude/') || files.includes('agents/')) return 'skill_execution';
++  return 'general';
++}
++
++function autoScore(meta, ops) {
++  // Heuristic scoring based on what happened
++  let score = 0.5; // Baseline
++
++  const cmds = ops.filter(o => o.c).map(o => o.c.toLowerCase());
++
++  // Successful git operations boost score
++  if (cmds.some(c => c.includes('git push'))) score += 0.15;
++  if (cmds.some(c => c.includes('git commit'))) score += 0.1;
++
++  // File modifications indicate productive work
++  const fileCount = (meta.filesModified || []).length;
++  if (fileCount > 0) score += Math.min(0.15, fileCount * 0.02);
++
++  // Many tool uses indicates deep work
++  if (ops.length > 20) score += 0.1;
++  if (ops.length > 50) score += 0.05;
++
++  // TypeScript check passing is good
++  if (cmds.some(c => c.includes('tsc') && !c.includes('error'))) score += 0.05;
++
++  return Math.min(1.0, Math.max(0.1, score));
++}
++
++function buildSequence(ops) {
++  // Build a simplified operation sequence for pattern matching
++  const simplified = [];
++  let lastTool = null;
++  for (const op of ops) {
++    if (op.t !== lastTool) {
++      simplified.push(op.t);
++      lastTool = op.t;
++    }
++  }
++  // Keep only first 10 unique steps
++  return simplified.slice(0, 10).join(' > ');
++}
++
++function extractPatterns(trajectory, ops) {
++  const sequence = buildSequence(ops);
++  if (!sequence || sequence.split(' > ').length < 2) return;
++
++  let patterns = [];
++  if (fs.existsSync(PATTERNS_FILE)) {
++    try { patterns = JSON.parse(fs.readFileSync(PATTERNS_FILE, 'utf-8')); }
++    catch { patterns = []; }
++  }
++
++  const existing = patterns.find(p => p.sequence === sequence);
++  if (existing) {
++    existing.count++;
++    existing.avgSuccess = (existing.avgSuccess * (existing.count - 1) + trajectory.successScore) / existing.count;
++    existing.lastSeen = new Date().toISOString();
++  } else {
++    patterns.push({
++      sequence,
++      type: trajectory.type,
++      count: 1,
++      avgSuccess: trajectory.successScore,
++      discoveredAt: new Date().toISOString(),
++      lastSeen: new Date().toISOString()
++    });
++  }
++
++  // Keep top 50 patterns
++  patterns.sort((a, b) => (b.count * b.avgSuccess) - (a.count * a.avgSuccess));
++  patterns = patterns.slice(0, 50);
++
++  fs.writeFileSync(PATTERNS_FILE, JSON.stringify(patterns, null, 2));
++}
++
++function main() {
++  try {
++    const input = JSON.parse(fs.readFileSync(0, 'utf-8'));
++
++    // Don't re-finalize if already in a stop hook continuation
++    if (input.stop_hook_active) {
++      process.exit(0);
++      return;
++    }
++
++    if (!fs.existsSync(ACTIVE_META)) {
++      process.exit(0);
++      return;
++    }
++
++    const meta = JSON.parse(fs.readFileSync(ACTIVE_META, 'utf-8'));
++    const ops = loadOperations();
++
++    // Skip trivial sessions (< 3 operations)
++    if (ops.length < 3) {
++      // Clean up without saving
++      try { fs.unlinkSync(ACTIVE_META); } catch {}
++      try { fs.unlinkSync(ACTIVE_OPS); } catch {}
++      process.exit(0);
++      return;
++    }
++
++    // Finalize trajectory
++    const trajectory = {
++      ...meta,
++      type: detectType(meta, ops),
++      completedAt: new Date().toISOString(),
++      duration: Date.now() - new Date(meta.startedAt).getTime(),
++      operationCount: ops.length,
++      successScore: autoScore(meta, ops),
++      toolBreakdown: {},
++      critique: `Auto-finalized: ${ops.length} operations, ${(meta.filesModified || []).length} files modified`
++    };
++
++    // Tool usage breakdown
++    ops.forEach(op => {
++      trajectory.toolBreakdown[op.t] = (trajectory.toolBreakdown[op.t] || 0) + 1;
++    });
++
++    // Save completed trajectory
++    const filename = `${trajectory.type}_${trajectory.id}.json`;
++    fs.writeFileSync(path.join(TRAJ_DIR, filename), JSON.stringify(trajectory, null, 2));
++
++    // Extract patterns
++    if (trajectory.successScore >= 0.5) {
++      extractPatterns(trajectory, ops);
++    }
++
++    // Clean up active files
++    try { fs.unlinkSync(ACTIVE_META); } catch {}
++    try { fs.unlinkSync(ACTIVE_OPS); } catch {}
++
++    process.exit(0);
++  } catch {
++    process.exit(0);
++  }
++}
++
++main();
+diff --git a/.claude/skills/skill-rules.json b/.claude/skills/skill-rules.json
+new file mode 100644
+index 0000000..b3e3011
+--- /dev/null
++++ b/.claude/skills/skill-rules.json
+@@ -0,0 +1,339 @@
++{
++  "version": "1.0.0",
++  "description": "Auto-activation rules for Agentic Creator OS skills",
++  "skills": {
++    "content": {
++      "type": "domain",
++      "enforcement": "suggest",
++      "priority": "high",
++      "description": "Content creation and marketing",
++      "promptTriggers": {
++        "keywords": [
++          "content",
++          "blog",
++          "article",
++          "post",
++          "social media",
++          "twitter",
++          "x",
++          "linkedin",
++          "instagram",
++          "facebook",
++          "newsletter",
++          "email",
++          "video",
++          "script",
++          "podcast",
++          "seo",
++          "keyword",
++          "thread",
++          "tweet",
++          "content strategy",
++          "content calendar"
++        ],
++        "intentPatterns": [
++          "write.*post|create.*content|make.*content",
++          "draft.*blog|write.*article",
++          "skill:content"
++        ]
++      },
++      "fileTriggers": {
++        "pathPatterns": [
++          "**/*.md",
++          "**/content/**",
++          "**/blog/**",
++          "**/posts/**"
++        ]
++      },
++      "share": "personal-creative"
++    },
++    "marketing": {
++      "type": "domain",
++      "enforcement": "suggest",
++      "priority": "medium",
++      "description": "Marketing and SEO",
++      "promptTriggers": {
++        "keywords": [
++          "marketing",
++          "campaign",
++          "advertising",
++          "seo",
++          "analytics",
++          "traffic",
++          "conversion",
++          "audience",
++          "ads",
++          "ppc",
++          "social ads",
++          "content marketing"
++        ],
++        "intentPatterns": [
++          "seo.*audit|run.*audit|marketing.*plan"
++        ]
++      },
++      "share": "personal-creative"
++    },
++    "dev": {
++      "type": "domain",
++      "enforcement": "suggest",
++      "priority": "medium",
++      "description": "Development and coding",
++      "promptTriggers": {
++        "keywords": [
++          "code",
++          "develop",
++          "build",
++          "create website",
++          "react",
++          "nextjs",
++          "typescript",
++          "javascript",
++          "api",
++          "database",
++          "backend",
++          "frontend",
++          "deploy",
++          "debug",
++          "fix bug"
++        ]
++      },
++      "share": "core"
++    },
++    "design": {
++      "type": "domain",
++      "enforcement": "suggest",
++      "priority": "medium",
++      "description": "Design and visual creation",
++      "promptTriggers": {
++        "keywords": [
++          "design",
++          "visual",
++          "graphic",
++          "logo",
++          "branding",
++          "template",
++          "ui",
++          "ux",
++          "interface",
++          "image",
++          "art",
++          "creative"
++        ]
++      },
++      "share": "core"
++    },
++    "business": {
++      "type": "domain",
++      "enforcement": "suggest",
++      "priority": "medium",
++      "description": "Business and project management",
++      "promptTriggers": {
++        "keywords": [
++          "client",
++          "customer",
++          "crm",
++          "invoice",
++          "project",
++          "budget",
++          "revenue",
++          "finance",
++          "onboarding",
++          "contract",
++          "proposal"
++        ]
++      },
++      "share": "core"
++    }
++  },
++  "agents": {
++    "content-writer": {
++      "type": "workflow",
++      "activation": "suggest",
++      "priority": "high",
++      "description": "Creates blog posts, articles, and long-form content",
++      "promptTriggers": {
++        "keywords": [
++          "write blog",
++          "write article",
++          "create post",
++          "draft content"
++        ]
++      },
++      "share": "personal-creative"
++    },
++    "social-media-manager": {
++      "type": "workflow",
++      "activation": "suggest",
++      "priority": "high",
++      "description": "Manages social media content across platforms",
++      "promptTriggers": {
++        "keywords": [
++          "twitter thread",
++          "linkedin post",
++          "instagram",
++          "facebook post",
++          "social media",
++          "x content",
++          "tweet",
++          "cast",
++          "farcaster"
++        ],
++        "intentPatterns": [
++          "create.*twitter|create.*linkedin|post.*social",
++          "skill:content.*x|skill:content.*linkedin|skill:content.*social"
++        ]
++      },
++      "share": "personal-creative"
++    },
++    "content-strategist": {
++      "type": "workflow",
++      "activation": "suggest",
++      "priority": "high",
++      "description": "Develops content strategy and planning",
++      "promptTriggers": {
++        "keywords": [
++          "content strategy",
++          "content plan",
++          "content calendar",
++          "content pillars",
++          "audience analysis"
++        ],
++        "intentPatterns": [
++          "create.*strategy|develop.*plan|plan.*content"
++        ]
++      },
++      "share": "personal-creative"
++    }
++  },
++  "defaultBehavior": {
++    "autoActivate": false,
++    "suggestSkills": true
++  },
++  "contextPatterns": {
++    "fileExtensions": {
++      ".md": [
++        "content",
++        "dev"
++      ],
++      ".tsx": [
++        "dev"
++      ],
++      ".ts": [
++        "dev"
++      ],
++      ".js": [
++        "dev"
++      ],
++      ".sql": [
++        "dev",
++        "database"
++      ],
++      ".json": [
++        "dev"
++      ],
++      ".html": [
++        "dev",
++        "marketing"
++      ],
++      ".css": [
++        "dev",
++        "design"
++      ],
++      ".svg": [
++        "design"
++      ],
++      ".png": [
++        "design"
++      ],
++      ".jpg": [
++        "design"
++      ],
++      ".mdx": [
++        "content",
++        "dev"
++      ]
++    },
++    "directories": {
++      "content/": [
++        "content"
++      ],
++      "blog/": [
++        "content",
++        "marketing"
++      ],
++      "marketing/": [
++        "marketing"
++      ],
++      "design/": [
++        "design"
++      ],
++      "src/": [
++        "dev"
++      ],
++      "api/": [
++        "dev"
++      ],
++      "pages/": [
++        "dev"
++      ],
++      "components/": [
++        "dev",
++        "design"
++      ],
++      "lib/": [
++        "dev"
++      ],
++      "workflows/": [
++        "content"
++      ]
++    }
++  },
++  "share_partition": {
++    "note": "See top-level SHARING.md in claude-code-config for full audit. Core reusable skills (MCP/orch/verif etc) vs grok-personal (4 .grok seeds) + personal-creative (frankx/soul/excellence/specific magical). Tags added for /sip-share-audit.",
++    "personal_creative": [
++      "content",
++      "marketing",
++      "book-publishing",
++      "brand-voice",
++      "creator-productivity",
++      "doc-coauthoring",
++      "excellence-book-writing",
++      "frankx",
++      "music",
++      "soulbook",
++      "greek",
++      "spartan",
++      "health",
++      "gym",
++      "social",
++      "oracle",
++      "personal"
++    ],
++    "core": [
++      "dev",
++      "design",
++      "business",
++      "analysis",
++      "architecture",
++      "data",
++      "development",
++      "devops",
++      "documentation",
++      "github",
++      "goal",
++      "optimization",
++      "payments",
++      "sona",
++      "sparc",
++      "specialized",
++      "sublinear",
++      "swarm",
++      "testing",
++      "gstack",
++      "verification",
++      "mcp",
++      "orchestration",
++      "skill-builder"
++    ]
++  }
++}
+diff --git a/.grok/hooks/pre-tool-gate.sh b/.grok/hooks/pre-tool-gate.sh
+index 163ec88..88fbcf5 100644
+--- a/.grok/hooks/pre-tool-gate.sh
++++ b/.grok/hooks/pre-tool-gate.sh
+@@ -1,3 +1,4 @@
+ #!/usr/bin/env bash
+-# ACOS Grok PreToolUse gate: rules + excellence reminder
+-echo "⚡ Gate: Read rules (GROK.md/CLAUDE.md)? Excellence (repo-mastery → verification/santa/gstack) engaged for this action?"
++# ACOS Grok PreToolUse gate: rules + excellence reminder (non-blocking)
++echo "⚡ Gate: Read rules (GROK.md/CLAUDE.md)? Excellence (repo-mastery → verification/santa/gstack) engaged for this action?" >&2
++exit 0
+diff --git a/.grok/hooks/pretooluse-excellence.json b/.grok/hooks/pretooluse-excellence.json
+index f65a03e..eca7b71 100644
+--- a/.grok/hooks/pretooluse-excellence.json
++++ b/.grok/hooks/pretooluse-excellence.json
+@@ -3,7 +3,13 @@
+     "PreToolUse": [
+       {
+         "matcher": "Edit|Write|MultiEdit|Bash",
+-        "command": "echo 'Excellence gate: rules first? DNA? multi-orchestrator? repo-mastery context? harnesses via terminal? gstack/santa if web? Review before proceed. Grok .grok personal excellence seeds only.'"
++        "hooks": [
++          {
++            "type": "command",
++            "command": "$HOME/.grok/hooks/pre-tool-gate.sh",
++            "timeout": 3000
++          }
++        ]
+       }
+     ]
+   }
+diff --git a/.grok/hooks/session-start-excellence.json b/.grok/hooks/session-start-excellence.json
+index f250db0..a4ed662 100644
+--- a/.grok/hooks/session-start-excellence.json
++++ b/.grok/hooks/session-start-excellence.json
+@@ -2,7 +2,13 @@
+   "hooks": {
+     "SessionStart": [
+       {
+-        "command": "echo 'Frank DNA excellence mode activated. Read CLAUDE.md/AGENTS.md/SHARING.md/SIP.md first (deeper wins). Shared .claude catalog active. MCPs (github/fs-starlight/git) ready. Use multi-harness-orchestrator + repo-mastery + excellence-review + harness-integration. Gates: verification-loop/santa-method/qa/cso/plan-reviews/gstack before ship. Grok .grok personal excellence seeds (excellence gates) opt-in only.'"
++        "hooks": [
++          {
++            "type": "command",
++            "command": "$HOME/.grok/hooks/session-start-excellence.sh",
++            "timeout": 3000
++          }
++        ]
+       }
+     ]
+   }
+diff --git a/.grok/hooks/session-start-excellence.sh b/.grok/hooks/session-start-excellence.sh
+index 5e31908..b96ff23 100644
+--- a/.grok/hooks/session-start-excellence.sh
++++ b/.grok/hooks/session-start-excellence.sh
+@@ -1,4 +1,5 @@
+ #!/usr/bin/env bash
+-# ACOS Grok: excellence + repo-mastery auto on SessionStart
+-echo "🧬 ACOS Grok Excellence v10.1.0 — repo-mastery + harness-integration + gstack gates + santa/verification loaded. Read GROK.md / CLAUDE.md first. God 99 mode."
+-# Can call grok /skills harness-integration etc.
++# ACOS Grok: excellence + repo-mastery auto on SessionStart (non-blocking)
++echo "🧬 ACOS Grok Excellence v10.1.0 — repo-mastery + harness-integration + gstack gates + santa/verification loaded. Read GROK.md / CLAUDE.md first. God 99 mode." >&2
++exit 0
++# Activate via /skills harness-integration or multi-harness-orchestrator when needed.
+diff --git a/AGENTS.md b/AGENTS.md
+index 6215a7e..1cb790a 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -1,4 +1,4 @@
+-# Second Brain OS — Agents
++﻿# Second Brain OS â€” Agents
+ 
+ > Agents that operate inside an SBO vault. OSS template ships 2; paid tier adds 8.
+ 
+@@ -20,15 +20,28 @@
+ 
+ Installed via `@frankx/second-brain-pro` npm package on purchase. Not in this OSS template.
+ 
+-1. **big5-inferer** — Big 5 personality inference. Monthly. Writes `_meta/psychometrics/big-5.md`. Ships with mandatory validity disclosure.
+-2. **16p-mapper** — MBTI/16P typology. Quarterly. Validity disclosure.
+-3. **stp-mapper** — StrengthsFinder analog. Quarterly. Validity disclosure.
+-4. **enneagram-analyzer** — Enneagram typology. Quarterly. Validity disclosure.
+-5. **business-map** — extracts businesses, ventures, projects. Monthly. Writes `_meta/businesses.md`.
+-6. **decision-history-miner** — pulls decisions from `notes/decisions/` + `_inbox/`. Monthly. Writes `_meta/decisions-history.md`.
+-7. **ikigai-extractor** — values + ikigai analysis. Quarterly. Writes `_meta/values.md`.
+-8. **content-engine-integration** — feeds the FrankX content pipeline. Weekly.
++1. **big5-inferer** â€” Big 5 personality inference. Monthly. Writes `_meta/psychometrics/big-5.md`. Ships with mandatory validity disclosure.
++2. **16p-mapper** â€” MBTI/16P typology. Quarterly. Validity disclosure.
++3. **stp-mapper** â€” StrengthsFinder analog. Quarterly. Validity disclosure.
++4. **enneagram-analyzer** â€” Enneagram typology. Quarterly. Validity disclosure.
++5. **business-map** â€” extracts businesses, ventures, projects. Monthly. Writes `_meta/businesses.md`.
++6. **decision-history-miner** â€” pulls decisions from `notes/decisions/` + `_inbox/`. Monthly. Writes `_meta/decisions-history.md`.
++7. **ikigai-extractor** â€” values + ikigai analysis. Quarterly. Writes `_meta/values.md`.
++8. **content-engine-integration** â€” feeds the FrankX content pipeline. Weekly.
+ 
+ ## Built on SIP
+ 
+ All agents emit SIP attestation blocks on artifact creation. Validity disclosures are non-removable.
++
++## Design Taste Kernel
++
++For any site, app, landing page, dashboard, visual identity, brand, motion, media, social, or frontend task, apply the shared Design Taste Kernel before handoff:
++
++- C:\Users\frank\starlight\repos\DESIGN_TASTE.md
++- C:\Users\frank\starlight\repos\WEB_EXPERIENCE_STANDARD.md
++- C:\Users\frank\starlight\repos\MOTION_TASTE_RUBRIC.md
++- C:\Users\frank\starlight\repos\MULTI_AGENT_DESIGN_COUNCIL.md
++- C:\Users\frank\starlight\repos\VISUAL_QA_GATE.md
++
++When motion, scroll, generated media, GIF/video, or premium polish matters, route through the Motion Design Studio plugin/skills and verify the result visually.
++
