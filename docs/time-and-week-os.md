@@ -14,18 +14,24 @@ Give multi-CLI agents (Hermes, Claude Code, Codex, OpenCode) one shared contract
 5. Write only to allowed second-brain zones
 6. Use Obsidian MCP sparingly
 
-## SSOT stack (order of truth)
+## SSOT stack (order of truth) — council v1.1
 
-| Rank | Plane | What it owns | Tool |
+| Rank | Plane | What it owns | Path / tool |
 |---|---|---|---|
-| 1 | **Ledger** | Time blocks, ROI labels, Pareto evidence | `~/.starlight/time-os/ledger/*.ndjson` |
-| 2 | **Google Calendar** | Human schedule + free/busy + optional AgentOps calendar | Google Calendar API |
-| 3 | **Second brain `_meta/time-os/`** | Weekly plans, Pareto notes, routine templates (agent write) | Obsidian vault (filesystem primary) |
-| 4 | **Mission Control AgentOps** | Agent work blocks bus | `starlight-mission-control` |
-| 5 | **Chat/session inference** | Soft reconstruction of the day | Hermes `session_search` / CLI session logs |
-| 6 | **Notion / Notion Calendar** | Optional narrative UI / viewer of Google | Never write SSOT |
+| 1a | **Agent runs** | Work receipts | `~/.starlight/runs/…/receipt.json` |
+| 1b | **Founder events** | Run lifecycle bus | `~/.starlight/events/founder-events-*.jsonl` |
+| 1c | **Time blocks** | Confirmed human+agent time | `~/.starlight/time-os/blocks/*.ndjson` |
+| 1d | **Week machine** | Single-writer plan | `~/.starlight/time-os/week/YYYY-Www/plan.json` |
+| 2 | **Google Human Primary** | Meetings / life schedule | Google Calendar API (human + EA gated) |
+| 3 | **Views** | AgentOps cal, ICS, Obsidian `_meta/time-os`, digests | regenerable |
+| 4 | **Proposed queue** | Soft chat inference | `~/.starlight/time-os/queue/proposed/` |
+| 5 | **Notion Calendar** | Optional UI | Never SSOT |
 
-**Hard rule:** Chat is signal. Ledger is truth. Calendar is schedule. Vault is compound knowledge.
+**Hard rules:** Chat is signal. **Blocks + runs + events** are truth. Calendar/Obsidian/Notion are views.  
+**Do not invent a third ledger.** Mission Control git `agent-log.ndjson` is non-authoritative (museum).  
+**One append script:** `~/.starlight/time-os/time_os_append.py` (or product copy). No freehand NDJSON.  
+**Streams stay separate:** agent-runs ≠ time-blocks ≠ week-plan — link by `run_id` / week_id.  
+**Dual-machine:** Yogabook primary writer; C940 read/enqueue only.
 
 ## Calendars (separate, always)
 
@@ -59,10 +65,12 @@ All CLIs read the same three files first:
 ### Anti-thrash rules
 
 1. One writer owns Google Human Primary per day (Hermes EA or Frank). Others propose.
-2. Ledger append-only NDJSON. Never rewrite history; correct with `status: corrected` + `corrects: <id>`.
-3. Weekly swarm runs **once** (Sunday local or Frank-chosen slot). Outputs go under a week id folder.
-4. Draft PR / local files first for product changes; no dual-gateway spam of digests.
-5. Obsidian MCP: use only for vault search/read/write when filesystem is awkward; default to filesystem tools.
+2. Blocks append-only via **one script**. Never rewrite history; correct with `status: corrected` + `corrects: <id>`.
+3. Soft inference → `queue/proposed/` only; confirmed rows require `confirmed_by` + `confirmed_at`.
+4. Weekly swarm single-flight: `locks/week-YYYY-Www.lock`; rewrite `plan.json` once; vault MD is a **view**.
+5. Draft PR / local files first for product changes; no dual-gateway spam of digests.
+6. Obsidian MCP: scalpel only — see `docs/mcp-usage-policy.md` (0 MCP for time jobs if FS works).
+7. Disk TIGHT: cap weekly research artifacts; no bulk clones for week review.
 
 ## Daily loop
 
@@ -88,33 +96,29 @@ Sensitive mood/health detail stays out of MCP vault unless Frank promotes an ano
 
 ## Weekly swarm (founder intelligence)
 
-Run as a bounded pipeline (not infinite chat):
+Composes topology report:  
+`starlight/queen/reports/weekly-pareto-founder-intelligence-swarm-topology-2026-07-16.md`  
+and protocol: `~/.starlight/weekly-pareto/protocol.v1.json`  
+→ **machine SSOT** always lands in `~/.starlight/time-os/week/YYYY-Www/plan.json`.
 
-| Phase | Agent role | Output |
+| Wave | Agents | Mode |
 |---|---|---|
-| W0 | **Context packer** | week facts: ledger hours, shipped links, open priorities |
-| W1 | **Pareto auditor** | 20% activities → 80% outcomes; kill list |
-| W2 | **Market & events scout** | macro + domain events next 7–14d |
-| W3 | **Research & books scout** | 3–7 high-signal insights (papers/books/operators) |
-| W4 | **Time design synthesizer** | next-week block design + energy phases |
-| W5 | **Psychology / cycle note** | mood/energy/attention cautions (non-clinical) |
-| W6 | **Chief of Staff merger** | single weekly brief + calendar proposals |
+| 0 | **A0** Conductor + gatekeeper (disk/token gates) | serial |
+| 1 | Work ledger · Intel · Market/audience · Events · Phase/body-mind | parallel read-only |
+| 2 | **Pareto scorer** + 3-lane week plan | serial |
+| 3 | Compiler + verifier → brief + gate JSON | serial → human |
 
-### Weekly artifacts (live instance)
+### Anti-busywork (measured)
 
-```
-brain/_meta/time-os/weeks/YYYY-Www/
-  00-context.md
-  01-pareto.md
-  02-market-events.md
-  03-research-books.md
-  04-time-design.md
-  05-psych-cycles.md
-  99-weekly-brief.md
-  evidence.json
-```
+- Caps: ≤30 work rows scored, ≤3 week lanes, ≤7 outcomes, ≤5 bets  
+- **≥40% kill/park** of candidate work or gate fails  
+- Agent work without durable residue max score 2  
+- Soft token budget (~140k); disk &lt;40 GiB free → no research fanout  
 
-Runtime copies may also live under `~/.starlight/time-os/weekly/YYYY-Www/`.
+### Weekly artifacts
+
+**Machine (SSOT):** `~/.starlight/time-os/week/YYYY-Www/plan.json` + packet files  
+**Vault (VIEW):** `brain/_meta/time-os/weeks/YYYY-Www/` (`00`…`05`, `99-weekly-brief.md`)
 
 ## Pareto measurement
 
