@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frankx.ai/schemas/time-block.v1.json",
+  "title": "Time Block v1 (human + agent)",
+  "type": "object",
+  "required": ["v", "id", "actor", "kind", "task", "start", "end", "status"],
+  "properties": {
+    "v": { "const": 1 },
+    "id": { "type": "string", "description": "Stable UUID or ulid" },
+    "actor": {
+      "type": "string",
+      "description": "Who spent the time",
+      "examples": ["frank", "hermes", "claude-code", "codex", "antigravity", "ci-swarm"]
+    },
+    "kind": {
+      "enum": ["human", "agent", "mixed"],
+      "description": "Primary nature of the block"
+    },
+    "task": { "type": "string", "description": "One-line description" },
+    "lane": {
+      "enum": ["arcanea", "frankx", "gencreator", "starlight-ops", "health", "life", "admin", "other"]
+    },
+    "class": {
+      "enum": ["leverage", "ship", "maintenance", "recovery", "waste", "unknown"]
+    },
+    "start": { "type": "string", "format": "date-time" },
+    "end": { "type": "string", "format": "date-time" },
+    "status": {
+      "enum": ["proposed", "confirmed", "shipped", "in-progress", "blocked", "abandoned", "corrected"]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Inference confidence; 1.0 if human confirmed"
+    },
+    "source": {
+      "enum": ["calendar", "ledger-hook", "session-infer", "human", "weekly-swarm", "other"]
+    },
+    "session": { "type": "string" },
+    "repo": { "type": "string" },
+    "outcome_score": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5,
+      "description": "0=none, 5=outsized leverage with proof"
+    },
+    "evidence_links": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "energy": { "enum": ["H", "M", "L", "unknown"] },
+    "mood_tag": {
+      "type": "string",
+      "description": "Optional non-clinical tag; keep private if sensitive"
+    },
+    "calendar_id": { "type": "string" },
+    "calendar_event_id": { "type": "string" },
+    "calendar_synced": { "type": "boolean", "default": false },
+    "corrects": { "type": "string", "description": "id of row this corrects" },
+    "notes": { "type": "string" },
+    "agentops": {
+      "type": "object",
+      "description": "Optional AgentOps payload mirror",
+      "properties": {
+        "model": { "type": "string" },
+        "loops": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  "additionalProperties": false
+}

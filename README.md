@@ -17,6 +17,7 @@ A bootable template for a working AI-augmented, two-vault Obsidian system. It in
 
 - **`brain/` vault** — MCP-wired. Your LLM (Claude Desktop, Claude Code, etc.) reads + writes here. Publishable.
 - **`private/` vault** — air-gapped. No MCP server points here. No LLM has access. Sensitive content lives here permanently.
+- **Time & Week OS** (optional composition) — multi-CLI time ledger, routines, weekly Pareto + founder intelligence swarm. Doctrine: [`docs/time-and-week-os.md`](docs/time-and-week-os.md).
 
 ## Why this beats the field
 

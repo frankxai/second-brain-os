@@ -60,6 +60,7 @@ SBO is a vertical that composes SIP (Starlight Intelligence Protocol). It declin
 - Starlight Chronicle — weekly Palace Review as distillation cadence
 - Family Tree — kinship data source for `_meta/family.md`
 - ACOS — trajectory data source for pattern-detector
+- **Time & Week OS** — personal time ledger + routines + weekly Pareto/intelligence swarm (`docs/time-and-week-os.md`); live surface `_meta/time-os/`; runtime ledger outside the vault
 
 See `composition-guide.md` for the wiring.
 

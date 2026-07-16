@@ -56,6 +56,28 @@ ln -s ~/.claude/skills/library-os "$brain/.claude/skills/library-os"
 # (etc.)
 ```
 
+## Pattern: Time & Week OS (calendar + ledger + weekly swarm)
+
+Compose personal operating rhythm without breaking SBO privacy:
+
+| Layer | Location | Writers |
+|---|---|---|
+| Product doctrine + schemas | this repo `docs/time-and-week-os.md`, `schemas/` | multi-CLI via PR |
+| Agent contract | `templates/brain-vault-skeleton/_agents/time-week-os.md` → live `_agents/` | agents |
+| Live weekly packets | `brain/_meta/time-os/weeks/` | time-week-os agent |
+| Runtime ledger (truth) | `~/.starlight/time-os/ledger/*.ndjson` | all CLIs via append script/hook |
+| AgentOps bus | `starlight-mission-control` | coding agents |
+| Google Calendar | Human Primary gated; AgentOps free | Hermes EA + hooks |
+| Obsidian MCP | optional vault search/write | **not** for ledger or `private/` |
+
+Weekly cadence pairs with Palace/Chronicle:
+
+1. Time & Week OS swarm → Pareto + next-week design + research/events brief  
+2. `/palace` distillation of inbox → notes/patterns  
+3. Human ratifies calendar proposals
+
+See full contract: [`time-and-week-os.md`](time-and-week-os.md).
+
 ## Pattern: MCP server federation
 
 Your Claude Desktop config can hold multiple MCP servers. The personal SBO instance composes:
