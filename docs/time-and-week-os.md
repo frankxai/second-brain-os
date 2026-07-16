@@ -128,24 +128,48 @@ Each closed block carries:
 
 - `lane`: arcanea | frankx | gencreator | starlight-ops | health | life | admin
 - `class`: leverage | ship | maintenance | recovery | waste
-- `outcome_score`: 0–5 (evidence-backed)
+- `outcome_score`: 0–5 (evidence-backed leverage)
+- `output_quality`: 0–5 (craft of the artifact)
+- `focus_score`: 0–5 (deep-work quality)
+- `place_mode`: wfh | cowork | office | cafe | travel | event | home_life | gym
+- `environment[]`, `people[]`
 - `evidence_links[]`: PR, deploy, revenue, post, decision note
 
 Weekly Pareto formula (simple v1):
 
 1. Group by activity cluster (lane+class+theme)
-2. Sum `outcome_score * duration_hours`
+2. Sum `outcome_score * duration_hours` (= impact_mass)
 3. Rank clusters; top cumulative 80% = **vital few**
 4. Bottom quartile maintenance with low score = **kill or automate candidates**
+5. Cross-cut by `place_mode` and `people` for environment/people ROI
+
+## Founder performance analysis (second brain)
+
+Vault surface: `_meta/time-os/performance/`
+
+Answers with **Frank’s data**, not generic advice:
+
+| Question | Method |
+|---|---|
+| Daily performance | day stubs + block scores |
+| Output quality | avg output_quality vs outcome_score |
+| WFH vs cowork | impact_mass by place_mode |
+| Week design | plan.json bets + deep_work ratio |
+| Environments / people | tags + people impact_mass |
+| Ahead | events scout + open gates |
+
+Tool: `python ~/.starlight/time-os/performance_rollup.py 14`  
+Elite patterns (Graham maker schedule, Bezos type-1/2, Grove written review, Naval leverage) are **hypotheses** tested against rollups.
 
 ## Second brain interconnection
 
 | Zone | Time OS use |
 |---|---|
-| `_meta/time-os/` | Agent operating surface (plans, Pareto, routines) |
+| `_meta/time-os/` | Agent operating surface (plans, Pareto, routines, performance) |
+| `_meta/time-os/performance/` | Environments, people planning, analysis doctrine |
 | `_moc/MOC-Time-OS.md` | Map of content hub |
 | `patterns/` | Promoted multi-week patterns only |
-| `people/` | Mentors / collaborators mentioned in week intel (optional) |
+| `people/` | Mentors / collaborators (people-map agent) |
 | `projects/` | **Human only** — Frank links projects to weeks |
 | `private/journal` | Human mood/energy (no MCP, no agent default) |
 | `_capture.md` | Human drops; agents never edit |

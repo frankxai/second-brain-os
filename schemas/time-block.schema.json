@@ -1,22 +1,18 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://frankx.ai/schemas/time-block.v1.json",
-  "title": "Time Block v1 (human + agent)",
+  "title": "Time Block v1.2 (human + agent + founder performance)",
   "type": "object",
   "required": ["v", "id", "actor", "kind", "task", "start", "end", "status"],
   "properties": {
     "v": { "const": 1 },
-    "id": { "type": "string", "description": "Stable UUID or ulid" },
+    "id": { "type": "string" },
     "actor": {
       "type": "string",
-      "description": "Who spent the time",
       "examples": ["frank", "hermes", "claude-code", "codex", "antigravity", "ci-swarm"]
     },
-    "kind": {
-      "enum": ["human", "agent", "mixed"],
-      "description": "Primary nature of the block"
-    },
-    "task": { "type": "string", "description": "One-line description" },
+    "kind": { "enum": ["human", "agent", "mixed"] },
+    "task": { "type": "string" },
     "lane": {
       "enum": ["arcanea", "frankx", "gencreator", "starlight-ops", "health", "life", "admin", "other"]
     },
@@ -28,40 +24,62 @@
     "status": {
       "enum": ["proposed", "confirmed", "shipped", "in-progress", "blocked", "abandoned", "corrected"]
     },
-    "confidence": {
-      "type": "number",
-      "minimum": 0,
-      "maximum": 1,
-      "description": "Inference confidence; 1.0 if human confirmed"
-    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
     "source": {
       "enum": ["calendar", "ledger-hook", "session-infer", "human", "weekly-swarm", "other"]
     },
     "session": { "type": "string" },
     "repo": { "type": "string" },
+    "run_id": { "type": "string" },
     "outcome_score": {
       "type": "integer",
       "minimum": 0,
       "maximum": 5,
-      "description": "0=none, 5=outsized leverage with proof"
+      "description": "Leverage / shipping impact with evidence"
     },
-    "evidence_links": {
+    "output_quality": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5,
+      "description": "Craft quality of the artifact (0=none, 5=elite publishable)"
+    },
+    "focus_score": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5,
+      "description": "Subjective deep-focus quality of the block"
+    },
+    "deep_work": { "type": "boolean", "default": false },
+    "place_mode": {
+      "enum": ["wfh", "cowork", "office", "cafe", "travel", "event", "home_life", "gym", "unknown"],
+      "description": "Where the human body was for this block"
+    },
+    "environment": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": { "type": "string" },
+      "description": "Context tags: quiet, social, noisy, outdoor, dual-monitor, phone-heavy, etc."
     },
+    "people": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Collaborators / audience present (use stable handles or first names; no private medical notes)"
+    },
+    "evidence_links": { "type": "array", "items": { "type": "string" } },
     "energy": { "enum": ["H", "M", "L", "unknown"] },
     "mood_tag": {
       "type": "string",
-      "description": "Optional non-clinical tag; keep private if sensitive"
+      "description": "Non-clinical optional tag; sensitive detail stays private vault"
     },
     "calendar_id": { "type": "string" },
     "calendar_event_id": { "type": "string" },
     "calendar_synced": { "type": "boolean", "default": false },
-    "corrects": { "type": "string", "description": "id of row this corrects" },
+    "corrects": { "type": "string" },
+    "confirmed": { "type": "boolean" },
+    "confirmed_by": { "type": "string" },
+    "confirmed_at": { "type": "string", "format": "date-time" },
     "notes": { "type": "string" },
     "agentops": {
       "type": "object",
-      "description": "Optional AgentOps payload mirror",
       "properties": {
         "model": { "type": "string" },
         "loops": { "type": "array", "items": { "type": "string" } }
