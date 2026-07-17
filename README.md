@@ -13,7 +13,7 @@
 
 ## What this is
 
-A bootable template that gives you a working AI-augmented two-vault Obsidian system. The compute that summarizes your conversations is the coding-agent session you already pay for, not an extra API bill.
+A bootable template that gives you a working AI-augmented two-vault Obsidian system. **This is the foundational infrastructure layer that powers the Agentic Mind OS.** The compute that summarizes your conversations is the coding-agent session you already pay for, not an extra API bill.
 
 - **`brain/` vault** — MCP-wired. Your LLM (Claude Desktop, Claude Code, etc.) reads + writes here. Publishable.
 - **`private/` vault** — air-gapped. No MCP server points here. No LLM has access. Sensitive content lives here permanently.
