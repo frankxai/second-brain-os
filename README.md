@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/assets/hero.svg" width="100%" alt="Second Brain OS — Persistent memory · Cross-session knowledge · Personal intelligence layer"/>
+</p>
+
 # Second Brain OS
 
 > An Obsidian second brain that reflects on its own corpus, cites everything it claims, and refuses to trust its own synthesis until an adversarial pass verifies it. Two-vault hard privacy separation. Coding-agent-native — the compute is the session you already pay for.
