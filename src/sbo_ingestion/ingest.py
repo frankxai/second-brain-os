@@ -18,18 +18,24 @@ Three modes:
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
 import click
 
 from sbo_ingestion import audit
-from sbo_ingestion.dual_write import DualWriteResult, write_index, write_pair
+from sbo_ingestion.dual_write import (
+    DualWriteResult,
+    _atomic_write_text,
+    index_existing_brain_paths,
+    write_index,
+    write_pair,
+)
 from sbo_ingestion.handlers import chatgpt as chatgpt_handler
 from sbo_ingestion.handlers import claude_ai as claude_ai_handler
 from sbo_ingestion.handlers import memories as memories_handler
 from sbo_ingestion.summarize import Summary, summarize
-
 
 Mode = Literal["agent", "api", "dry-run"]
 DEFAULT_MODE: Mode = "agent"
@@ -74,9 +80,14 @@ def _dry_run_summary(convo) -> Summary:  # type: ignore[no-untyped-def]
 
 def _detect_format(path: Path) -> str:
     """Detect export format from file extension and content shape."""
-    if path.suffix == ".jsonl":
+    suffix = path.suffix.lower()
+    if suffix == ".jsonl":
         return "claude.ai"
-    if path.suffix == ".json":
+    if suffix == ".zip":
+        if chatgpt_handler.conversation_members(path):
+            return "chatgpt"
+        raise ValueError(f"No ChatGPT conversation members found in ZIP export: {path}")
+    if suffix == ".json":
         try:
             with path.open("r", encoding="utf-8") as f:
                 head = f.read(2048)
@@ -87,8 +98,8 @@ def _detect_format(path: Path) -> str:
         except Exception:
             pass
     raise ValueError(
-        f"Unknown export format: {path}. Expected .jsonl (Claude.ai) "
-        f"or .json (ChatGPT conversations.json)."
+        f"Unknown export format: {path}. Expected .jsonl (Claude.ai), "
+        f".json (ChatGPT conversations.json), or an official ChatGPT export .zip."
     )
 
 
@@ -155,14 +166,27 @@ def ingest(
 
     fmt = _detect_format(export_path)
     if fmt == "claude.ai":
-        convos = list(claude_ai_handler.parse_export(export_path))
+        convos = claude_ai_handler.parse_export(export_path)
+        selected_members = (export_path.name,)
     elif fmt == "chatgpt":
-        convos = list(chatgpt_handler.parse_export(export_path))
+        convos = chatgpt_handler.parse_export(export_path)
+        selected_members = (
+            chatgpt_handler.conversation_members(export_path)
+            if export_path.suffix.lower() == ".zip"
+            else (export_path.name,)
+        )
     else:
         raise ValueError(f"Unsupported format: {fmt}")
 
     results: list[DualWriteResult] = []
+    index_convos = []
+    platform = fmt
+    existing_brain_paths = index_existing_brain_paths(
+        brain_root=brain_root,
+        platform=fmt,
+    )
     for convo in convos:
+        platform = convo.platform
         if effective_mode == "api":
             summary = summarize(convo, api_key=api_key)
         elif effective_mode == "dry-run":
@@ -171,11 +195,15 @@ def ingest(
             summary = _agent_stub_summary(convo)
 
         result = write_pair(
-            convo, summary, brain_root=brain_root, private_root=private_root
+            convo,
+            summary,
+            brain_root=brain_root,
+            private_root=private_root,
+            existing_brain_paths=existing_brain_paths,
         )
         # Stamp status: needs-summary for agent mode (the rest stay "triage")
-        if effective_mode == "agent":
-            _mark_needs_summary(result.brain_path)
+        if effective_mode == "agent" and not result.brain_preserved:
+            _mark_needs_summary(result.brain_path, brain_root=brain_root)
 
         audit.record_ingest(
             private_root,
@@ -186,23 +214,38 @@ def ingest(
             brain_path=result.brain_path,
             private_root_for_rel=private_root,
             brain_root_for_rel=brain_root,
+            brain_preserved=result.brain_preserved,
         )
         results.append(result)
+        # Keep only index metadata. Message bodies may be gigabytes across a full
+        # export and have already been written to the private vault.
+        index_convos.append(replace(convo, messages=()))
 
     # Corpus map: newest-first {date, title, summary} table per platform.
-    if convos:
-        write_index(convos, brain_root=brain_root, platform=convos[0].platform)
+    if index_convos:
+        write_index(index_convos, brain_root=brain_root, platform=platform)
 
     # High-signal memory export, if the source export shipped a memories.json.
     found = _find_memories(export_path, memories_path)
     if found is not None:
-        platform = convos[0].platform if convos else fmt
         memories_handler.write_memory_export(found, brain_root=brain_root, platform=platform)
+
+    preserved_count = sum(result.brain_preserved for result in results)
+    audit.record_import_receipt(
+        private_root,
+        source_name=export_path.name,
+        source_size=export_path.stat().st_size,
+        fmt=fmt,
+        selected_members=selected_members,
+        conversation_count=len(results),
+        brain_created=len(results) - preserved_count,
+        brain_preserved=preserved_count,
+    )
 
     return results
 
 
-def _mark_needs_summary(brain_path: Path) -> None:
+def _mark_needs_summary(brain_path: Path, *, brain_root: Path) -> None:
     """Update brain file frontmatter to set status=needs-summary.
 
     Called only for agent-mode ingests. The /distill-inbox agent looks for this
@@ -219,7 +262,7 @@ def _mark_needs_summary(brain_path: Path) -> None:
     if "needs-triage" in tags:
         tags.remove("needs-triage")
     post["tags"] = tags
-    brain_path.write_text(frontmatter.dumps(post), encoding="utf-8")
+    _atomic_write_text(brain_path, frontmatter.dumps(post), root=brain_root)
 
 
 @click.command()

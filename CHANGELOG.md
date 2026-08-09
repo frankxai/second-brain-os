@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Direct ChatGPT export ZIP ingestion, including current numbered
+  `conversations-NNN.json` shards in deterministic order without extracting the
+  archive.
+- Fail-closed ZIP validation for mixed, nested, duplicated, or gapped conversation
+  members and duplicate conversation IDs across shards.
+- Identity-addressed brain paths, preservation of previously distilled notes on
+  re-ingestion, path-safe source IDs, and atomic raw/brain/index writes.
+- Private completed-import receipts with selected ZIP members and created/preserved
+  conversation counts.
+
+### Changed
+
+- ChatGPT corpora are streamed shard-by-shard and only lightweight index metadata
+  is retained after each conversation is dual-written, avoiding whole-corpus RAM
+  growth on multi-gigabyte exports.
+
 ## [0.3.0] — 2026-07-02
 
 ### Added

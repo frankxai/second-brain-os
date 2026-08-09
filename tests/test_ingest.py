@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from zipfile import ZipFile
 
 import frontmatter
 
@@ -47,6 +49,86 @@ def test_ingest_chatgpt_routes_correctly(
     assert len(result) == 1
     assert (private / "chat-history" / "chatgpt").exists()
     assert (brain / "_inbox" / "chatgpt").exists()
+
+
+def test_ingest_chatgpt_sharded_zip_without_extraction(
+    chatgpt_export_path: Path,
+    tmp_path: Path,
+    tmp_vault_pair: tuple[Path, Path],
+) -> None:
+    source = json.loads(chatgpt_export_path.read_text(encoding="utf-8"))
+    second = dict(source[0])
+    second["id"] = "conv-bbbb-2222"
+    second["title"] = source[0]["title"]  # exercise collision-safe brain filenames
+    export_zip = tmp_path / "chatgpt-export.zip"
+    with ZipFile(export_zip, "w") as archive:
+        archive.writestr("conversations-001.json", json.dumps([second]))
+        archive.writestr("conversations-000.json", json.dumps(source))
+
+    brain, private = tmp_vault_pair
+    result = ingest(export_zip, brain_root=brain, private_root=private, mode="agent")
+
+    assert len(result) == 2
+    assert len({item.brain_path for item in result}) == 2
+    assert all(item.private_path.exists() for item in result)
+    assert (brain / "_inbox" / "chatgpt" / "_INDEX.md").exists()
+    receipts = list((private / "_distill" / "imports").glob("*.json"))
+    assert len(receipts) == 1
+    receipt = json.loads(receipts[0].read_text(encoding="utf-8"))
+    assert receipt["selected_members"] == [
+        "conversations-000.json",
+        "conversations-001.json",
+    ]
+    assert receipt["conversation_count"] == 2
+    assert "source_path" not in receipt
+    assert all("C:\\" not in member for member in receipt["selected_members"])
+
+
+def test_reingest_preserves_existing_brain_content(
+    chatgpt_export_path: Path,
+    tmp_vault_pair: tuple[Path, Path],
+) -> None:
+    brain, private = tmp_vault_pair
+    first = ingest(chatgpt_export_path, brain_root=brain, private_root=private, mode="agent")
+    note = frontmatter.load(first[0].brain_path)
+    note["status"] = "distilled"
+    note.content = "# Durable synthesis\n\nKeep this curated analysis.\n"
+    first[0].brain_path.write_text(frontmatter.dumps(note), encoding="utf-8")
+
+    second = ingest(chatgpt_export_path, brain_root=brain, private_root=private, mode="agent")
+    preserved = frontmatter.load(second[0].brain_path)
+
+    assert second[0].brain_preserved is True
+    assert preserved["status"] == "distilled"
+    assert "Keep this curated analysis." in preserved.content
+
+
+def test_reingest_finds_promoted_note_outside_inbox(
+    chatgpt_export_path: Path,
+    tmp_vault_pair: tuple[Path, Path],
+) -> None:
+    brain, private = tmp_vault_pair
+    first = ingest(chatgpt_export_path, brain_root=brain, private_root=private, mode="agent")
+    promoted_dir = brain / "notes" / "learnings"
+    promoted_dir.mkdir(parents=True)
+    promoted_path = promoted_dir / "durable-chatgpt-learning.md"
+    first[0].brain_path.replace(promoted_path)
+    promoted = frontmatter.load(promoted_path)
+    promoted["status"] = "distilled"
+    promoted.content = "# Promoted insight\n\nThis note has left the inbox.\n"
+    promoted_path.write_text(frontmatter.dumps(promoted), encoding="utf-8")
+
+    second = ingest(chatgpt_export_path, brain_root=brain, private_root=private, mode="agent")
+
+    assert second[0].brain_path == promoted_path
+    assert second[0].brain_preserved is True
+    assert "This note has left the inbox." in promoted_path.read_text(encoding="utf-8")
+    inbox_notes = [
+        path
+        for path in (brain / "_inbox" / "chatgpt").glob("*.md")
+        if not path.name.startswith("_")
+    ]
+    assert inbox_notes == []
 
 
 def test_ingest_unknown_format_raises(

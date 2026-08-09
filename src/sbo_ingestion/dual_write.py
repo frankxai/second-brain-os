@@ -10,9 +10,13 @@ path (the MCP server cannot resolve it; the link is for human reference in Obsid
 
 from __future__ import annotations
 
+import os
+import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
+from uuid import uuid4
 
 import frontmatter
 from slugify import slugify
@@ -25,19 +29,20 @@ from sbo_ingestion.summarize import Summary
 class DualWriteResult:
     private_path: Path
     brain_path: Path
+    brain_preserved: bool = False
 
 
 def _date_from(iso: str) -> str:
-    if not iso:
-        return datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+    if not iso or not isinstance(iso, str):
+        return "undated"
     try:
         return datetime.fromisoformat(iso.replace("Z", "+00:00")).strftime("%Y-%m-%d")
     except ValueError:
-        return iso[:10]
+        return "undated"
 
 
 def _now_iso() -> str:
-    return datetime.now(tz=timezone.utc).isoformat()
+    return datetime.now(tz=UTC).isoformat()
 
 
 def write_pair(
@@ -46,15 +51,23 @@ def write_pair(
     *,
     brain_root: Path,
     private_root: Path,
+    existing_brain_paths: dict[str, Path] | None = None,
 ) -> DualWriteResult:
-    """Write the dual-write pair. Creates parent directories as needed."""
+    """Write the dual-write pair without replacing an existing distilled note.
+
+    Raw files are authoritative source copies and are refreshed atomically.
+    Brain notes are identity-addressed and preserved when the same conversation
+    was already ingested, so a re-import cannot erase later human/agent work.
+    """
     date = _date_from(convo.created_at)
     platform_dir = convo.platform.replace(".", "-")  # claude.ai -> claude-ai
+    conversation_token = _conversation_token(convo.uuid)
+    source_id_token = _source_id_token(convo.uuid)
 
     # Private (raw)
     private_dir = private_root / "chat-history" / platform_dir
     private_dir.mkdir(parents=True, exist_ok=True)
-    private_filename = f"{date}-{convo.uuid}.md"
+    private_filename = f"{date}-{source_id_token}.md"
     private_path = private_dir / private_filename
     private_post = frontmatter.Post(
         content=convo.to_raw_markdown(),
@@ -66,14 +79,34 @@ def write_pair(
         imported=_now_iso(),
         message_count=len(convo.messages),
     )
-    private_path.write_text(frontmatter.dumps(private_post), encoding="utf-8")
+    _atomic_write_text(
+        private_path,
+        frontmatter.dumps(private_post),
+        root=private_root,
+    )
 
     # Brain (summary)
     brain_dir = brain_root / "_inbox" / platform_dir
     brain_dir.mkdir(parents=True, exist_ok=True)
-    slug = slugify(summary.title)[:80] or "untitled"
-    brain_filename = f"{date}-{slug}.md"
-    brain_path = brain_dir / brain_filename
+    brain_filename = f"{date}-{conversation_token}.md"
+    canonical_brain_path = brain_dir / brain_filename
+    brain_path = (existing_brain_paths or {}).get(convo.uuid, canonical_brain_path)
+    _assert_descendant(brain_path, brain_root)
+
+    if brain_path.exists():
+        existing = frontmatter.load(brain_path)
+        if existing.get("conversation_id") != convo.uuid:
+            raise FileExistsError(
+                f"Brain path collision for conversation {convo.uuid}: {brain_path}"
+            )
+        if existing_brain_paths is not None:
+            existing_brain_paths[convo.uuid] = brain_path
+        return DualWriteResult(
+            private_path=private_path,
+            brain_path=brain_path,
+            brain_preserved=True,
+        )
+
     brain_body = _render_brain_body(summary)
     # Reference the private file by name relative to the private vault (informational only)
     private_ref = f"chat-history/{platform_dir}/{private_filename}"
@@ -90,9 +123,76 @@ def write_pair(
     # frontmatter so agents (and the _INDEX map) can read it without opening the raw file.
     if convo.summary:
         brain_post["summary"] = convo.summary
-    brain_path.write_text(frontmatter.dumps(brain_post), encoding="utf-8")
+    _atomic_write_text(brain_path, frontmatter.dumps(brain_post), root=brain_root)
+    if existing_brain_paths is not None:
+        existing_brain_paths[convo.uuid] = brain_path
 
     return DualWriteResult(private_path=private_path, brain_path=brain_path)
+
+
+def index_existing_brain_paths(*, brain_root: Path, platform: str) -> dict[str, Path]:
+    """Build one ID-to-path map across inbox and promoted brain notes."""
+    if not brain_root.exists():
+        return {}
+
+    indexed: dict[str, Path] = {}
+    normalized_platform = platform.replace(".", "-")
+    for path in brain_root.rglob("*.md"):
+        relative = path.relative_to(brain_root)
+        if any(part.startswith(".") for part in relative.parts):
+            continue
+        try:
+            post = frontmatter.load(path)
+        except (OSError, UnicodeError):
+            continue
+        source = str(post.get("source") or "").replace(".", "-")
+        if source and source != normalized_platform:
+            continue
+        conversation_id = str(post.get("conversation_id") or "")
+        if not conversation_id:
+            continue
+        previous = indexed.get(conversation_id)
+        if previous is not None and previous != path:
+            raise ValueError(
+                f"Duplicate brain notes for conversation {conversation_id}: "
+                f"{previous} and {path}"
+            )
+        indexed[conversation_id] = path
+    return indexed
+
+
+def _conversation_token(conversation_id: str) -> str:
+    """Return a path-safe, collision-resistant token for an external ID."""
+    if not conversation_id or not conversation_id.strip():
+        raise ValueError("Conversation ID must be a non-empty string")
+    readable = slugify(conversation_id)[:48] or "conversation"
+    digest = sha256(conversation_id.encode("utf-8")).hexdigest()[:16]
+    return f"{readable}-{digest}"
+
+
+def _source_id_token(conversation_id: str) -> str:
+    """Preserve safe legacy source IDs; hash anything path-like or oversized."""
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", conversation_id):
+        return conversation_id
+    return _conversation_token(conversation_id)
+
+
+def _assert_descendant(path: Path, parent: Path) -> None:
+    try:
+        path.resolve().relative_to(parent.resolve())
+    except ValueError as exc:
+        raise ValueError(f"Refusing to write outside {parent}: {path}") from exc
+
+
+def _atomic_write_text(path: Path, text: str, *, root: Path) -> None:
+    """Write UTF-8 text with an atomic same-directory replace."""
+    _assert_descendant(path, root)
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    try:
+        temporary.write_text(text, encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def write_index(
@@ -135,7 +235,7 @@ def write_index(
         conversation_count=len(ordered),
         tags=["index"],
     )
-    index_path.write_text(frontmatter.dumps(post), encoding="utf-8")
+    _atomic_write_text(index_path, frontmatter.dumps(post), root=brain_root)
     return index_path
 
 
