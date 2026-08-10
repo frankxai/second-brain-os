@@ -34,6 +34,26 @@ def test_conversation_messages_are_in_order(chatgpt_export_path: Path) -> None:
     assert "conversations.json" in convo.messages[1].text
 
 
+def test_invalid_export_timestamps_do_not_abort_the_conversation(
+    chatgpt_export_path: Path, tmp_path: Path
+) -> None:
+    source = json.loads(chatgpt_export_path.read_text(encoding="utf-8"))
+    source[0]["create_time"] = 1e100
+    source[0]["update_time"] = "not-a-timestamp"
+    for node in source[0]["mapping"].values():
+        if node.get("message"):
+            node["message"]["create_time"] = 1e100
+    export_path = tmp_path / "invalid-timestamps.json"
+    export_path.write_text(json.dumps(source), encoding="utf-8")
+
+    conversation = next(parse_export(export_path))
+
+    assert conversation.uuid == "conv-aaaa-1111"
+    assert conversation.created_at == ""
+    assert conversation.updated_at == ""
+    assert all(message.created_at == "" for message in conversation.messages)
+
+
 def test_to_raw_markdown_renders(chatgpt_export_path: Path) -> None:
     convo = next(parse_export(chatgpt_export_path))
     md = convo.to_raw_markdown()

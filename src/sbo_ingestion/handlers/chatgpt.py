@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from io import TextIOWrapper
 from pathlib import Path, PurePosixPath
 from zipfile import BadZipFile, ZipFile
@@ -123,10 +123,16 @@ def _parse_array(data: object, *, source: str) -> Iterator[Conversation]:
         yield _parse_conversation(obj)
 
 
-def _epoch_to_iso(ts: float | None) -> str:
-    if ts is None:
+def _epoch_to_iso(ts: object | None) -> str:
+    if isinstance(ts, bool) or not isinstance(ts, (int, float)):
         return ""
-    return datetime.fromtimestamp(ts, tz=UTC).isoformat()
+    try:
+        # Avoid platform-specific ``fromtimestamp`` range failures on Windows.
+        # Official exports occasionally contain outlier timestamps; retain the
+        # conversation and omit only the invalid metadata value.
+        return (datetime(1970, 1, 1, tzinfo=UTC) + timedelta(seconds=ts)).isoformat()
+    except (OverflowError, ValueError):
+        return ""
 
 
 def _walk_mapping(mapping: dict) -> list[dict]:
