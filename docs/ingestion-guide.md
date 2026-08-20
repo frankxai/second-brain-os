@@ -43,14 +43,31 @@ sbo-ingest path/to/conversations.jsonl
 ### What you get
 
 A ZIP archive containing:
-- `conversations.json` — full message history with `mapping` tree per conversation
+- `conversations.json` — legacy single-file full message history; or
+- `conversations-000.json`, `conversations-001.json`, … — current numbered shards,
+  each with the same `mapping` tree per conversation
 - `chat.html` — human-readable browser version (ignore for ingestion)
 
 ### Run ingest
 
 ```bash
-sbo-ingest path/to/conversations.json
+sbo-ingest path/to/the-downloaded-chatgpt-export.zip
 ```
+
+Do not extract multi-gigabyte exports first. `sbo-ingest` reads the ZIP directly,
+orders numbered shards deterministically, excludes `shared_conversations.json`,
+and releases each shard's message bodies after their private-vault files are written.
+An already-extracted legacy `conversations.json` remains supported.
+
+The ZIP layout is validated before ingestion. Mixed legacy/sharded members, nested
+conversation members, duplicate or missing shard indexes, and duplicate conversation
+IDs fail closed instead of silently dropping data. A completed import writes a private
+receipt under `private/_distill/imports/` with the selected members and counts.
+
+Re-running an export preserves curated work: raw source files are refreshed with an
+atomic replace, while an existing brain note with the same conversation ID is kept.
+The lookup covers promoted notes across the brain vault, and the summary path is
+identity-addressed, so moves or title changes do not fork a second note.
 
 ## What happens during ingest
 
@@ -61,7 +78,7 @@ For each conversation:
 3. **Voice-check** the summary against the AI-slop banned-phrase list.
 4. **Dual-write:**
    - `private/chat-history/{platform}/YYYY-MM-DD-{conversation-id}.md` (full raw)
-   - `brain/_inbox/{platform}/YYYY-MM-DD-{slug}.md` (summary + insights)
+   - `brain/_inbox/{platform}/YYYY-MM-DD-{conversation-token}.md` (summary + insights)
 
 The brain file links to the private file by relative path. Your MCP server cannot resolve the link (that's the privacy contract).
 
