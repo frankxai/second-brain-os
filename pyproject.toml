@@ -1,6 +1,6 @@
 [project]
 name = "sbo-ingestion"
-version = "0.1.0"
+version = "0.2.0"
 description = "Second Brain OS — chat-export ingestion pipeline (Claude.ai + ChatGPT → dual-write to brain/ + private/)"
 license = { text = "MIT" }
 authors = [{ name = "Frank Riemer" }]
@@ -25,6 +25,7 @@ dev = [
 
 [project.scripts]
 sbo-ingest = "sbo_ingestion.ingest:cli"
+sbo-distill = "sbo_ingestion.distill:cli"
 
 [build-system]
 requires = ["hatchling"]
