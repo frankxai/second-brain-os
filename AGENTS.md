@@ -6,12 +6,12 @@
 
 - **Branch:** `main` is the trunk. Cut a feature branch per change (`agent/<harness>/<scope>` if you're one of several parallel agents — see the estate-wide multi-agent protocol in the parent `starlight/repos/CLAUDE.md`). Never commit directly to `main` from an automated session unless told to.
 - **Install:** `python -m venv .venv && source .venv/bin/activate` (or `.venv\Scripts\activate` on Windows), then `pip install -e .`.
-- **Test:** `pytest -v` must be green before you open a PR. 37 tests cover the Claude.ai/ChatGPT handlers, the summarizer (mocked Anthropic), voice check, dual-write, and end-to-end ingest across all three modes. CI (`.github/workflows/test.yml`) runs the full matrix on ubuntu/macos/windows x Python 3.11/3.12/3.13.
-- **Privacy gate:** if you touch `scripts/`, `templates/`, or `src/sbo_ingestion/dual_write.py`, also run `bash scripts/verify-privacy.sh templates/private-vault-skeleton` (or the `.ps1` on Windows) and confirm it reports 6/6. This is the check that the `private/` vault stays air-gapped from MCP.
+- **Test:** `pytest -v` must be green before you open a PR. 78 tests cover the Claude.ai/ChatGPT handlers, the summarizer (mocked Anthropic), voice check, dual-write, the distill CLI, end-to-end ingest across all three modes, and an adversarial suite (path traversal, NTFS streams, prompt injection, malformed timestamps). CI (`.github/workflows/test.yml`) runs the full matrix on ubuntu/macos/windows x Python 3.11/3.12/3.13.
+- **Privacy gate:** if you touch `scripts/`, `templates/`, or `src/sbo_ingestion/dual_write.py`, also run `bash scripts/verify-privacy.sh templates/private-vault-skeleton` (or the `.ps1` on Windows) and confirm it exits 0 with zero failures. Machine-level items (Windows Search exclusion, macOS Time Machine exclusion) report WARN with their manual remediation and do not fail the run. This is the check that the `private/` vault stays air-gapped from MCP.
 - **Voice gate:** no AI-slop phrases in docs or generated content (delve, dive into, it's worth noting, certainly, absolutely) — enforced by `src/sbo_ingestion/voice_check.py` and checked in CI.
 - **Non-negotiable invariant:** nothing you add may give MCP (or any LLM connector) a path into `private/`. The two-vault boundary is filesystem-level, not config-level — don't "fix" it with a permission flag.
 - **Full PR checklist:** see [`CONTRIBUTING.md`](CONTRIBUTING.md).
-- **Don't touch:** `.asph-wip/` is another harness's scratch state — never stage it.
+- **Don't touch:** maintainer-local harness state (`.asph-wip/`, `.grok/`, `.agent-harness.json`) is gitignored. If it reappears in `git status`, ignore it rather than staging it.
 
 ## What ships in this template
 

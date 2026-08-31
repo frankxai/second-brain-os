@@ -19,6 +19,8 @@ if [[ -d "$BRAIN_PATH" || -d "$PRIVATE_PATH" ]]; then
   exit 1
 fi
 
+mkdir -p "$VAULT_PARENT"
+
 echo "Creating brain/ at $BRAIN_PATH ..."
 cp -r "$REPO_ROOT/templates/brain-vault-skeleton" "$BRAIN_PATH"
 echo "Creating private/ at $PRIVATE_PATH ..."
@@ -60,11 +62,16 @@ Next steps:
          "args": ["mcp-obsidian"],
          "env": {
            "OBSIDIAN_API_KEY": "<from Local REST API plugin in brain vault>",
-           "OBSIDIAN_HOST": "https://localhost:27124"
+           "OBSIDIAN_HOST": "127.0.0.1",
+           "OBSIDIAN_PORT": "27124"
          }
        }
      }
    }
+
+   Claude Code instead -- one line, no file editing:
+
+     claude mcp add sbo-obsidian --env OBSIDIAN_API_KEY=<your-key> --env OBSIDIAN_HOST=127.0.0.1 --env OBSIDIAN_PORT=27124 -- uvx mcp-obsidian
 
 5. Add your private vault at $PRIVATE_PATH as a SEPARATE Obsidian vault.
 
@@ -78,7 +85,7 @@ Next steps:
 8. When exports arrive, run:
      export SBO_BRAIN_VAULT_ROOT="$BRAIN_PATH"
      export SBO_PRIVATE_VAULT_ROOT="$PRIVATE_PATH"
-     export ANTHROPIC_API_KEY="<your-key>"
+     export ANTHROPIC_API_KEY="<your-key>"   # only needed for --mode api
      sbo-ingest path/to/conversations.json
 
 Setup complete.

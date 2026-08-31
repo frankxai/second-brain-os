@@ -1,0 +1,146 @@
+[
+  {
+    "id": "conv-shard1-0001",
+    "title": "Sharded export shard one",
+    "create_time": 1778572800.0,
+    "update_time": 1778573100.0,
+    "mapping": {
+      "root": {
+        "id": "root",
+        "message": null,
+        "parent": null,
+        "children": [
+          "conv-shard1-0001-1"
+        ]
+      },
+      "conv-shard1-0001-1": {
+        "id": "conv-shard1-0001-1",
+        "message": {
+          "id": "conv-shard1-0001-1",
+          "author": {
+            "role": "user",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1778572800.0,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "Do the shards need to be merged before ingestion?"
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1.0,
+          "metadata": {},
+          "recipient": "all"
+        },
+        "parent": "root",
+        "children": [
+          "conv-shard1-0001-2"
+        ]
+      },
+      "conv-shard1-0001-2": {
+        "id": "conv-shard1-0001-2",
+        "message": {
+          "id": "conv-shard1-0001-2",
+          "author": {
+            "role": "assistant",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1778572820.0,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "No. Point the ingester at the directory and it walks the shards in sorted order."
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1.0,
+          "metadata": {},
+          "recipient": "all"
+        },
+        "parent": "conv-shard1-0001-1",
+        "children": []
+      }
+    },
+    "moderation_results": [],
+    "current_node": "conv-shard1-0001-2"
+  },
+  {
+    "id": "conv-shard1-0002",
+    "title": "Second conversation in shard one",
+    "create_time": 1778573800.0,
+    "update_time": 1778574100.0,
+    "mapping": {
+      "root": {
+        "id": "root",
+        "message": null,
+        "parent": null,
+        "children": [
+          "conv-shard1-0002-1"
+        ]
+      },
+      "conv-shard1-0002-1": {
+        "id": "conv-shard1-0002-1",
+        "message": {
+          "id": "conv-shard1-0002-1",
+          "author": {
+            "role": "user",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1778573800.0,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "Does shard order matter?"
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1.0,
+          "metadata": {},
+          "recipient": "all"
+        },
+        "parent": "root",
+        "children": [
+          "conv-shard1-0002-2"
+        ]
+      },
+      "conv-shard1-0002-2": {
+        "id": "conv-shard1-0002-2",
+        "message": {
+          "id": "conv-shard1-0002-2",
+          "author": {
+            "role": "assistant",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1778573820.0,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "Zero-padded shard names sort lexicographically into chronological export order."
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1.0,
+          "metadata": {},
+          "recipient": "all"
+        },
+        "parent": "conv-shard1-0002-1",
+        "children": []
+      }
+    },
+    "moderation_results": [],
+    "current_node": "conv-shard1-0002-2"
+  }
+]

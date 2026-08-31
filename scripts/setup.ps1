@@ -44,7 +44,8 @@ $snippet = @"
       "args": ["mcp-obsidian"],
       "env": {
         "OBSIDIAN_API_KEY": "<from Local REST API plugin in brain vault>",
-        "OBSIDIAN_HOST": "https://localhost:27124"
+        "OBSIDIAN_HOST": "127.0.0.1",
+        "OBSIDIAN_PORT": "27124"
       }
     }
   }
@@ -57,6 +58,8 @@ Write-Host "2. Install community plugins (Obsidian will prompt -- confirm Local 
 Write-Host "3. In Local REST API plugin settings: copy the API key"
 Write-Host "4. Add this snippet to your Claude Desktop config:`n"
 Write-Host $snippet -ForegroundColor DarkGray
+Write-Host "`n   Claude Code instead -- one line, no file editing:`n"
+Write-Host "   claude mcp add sbo-obsidian --env OBSIDIAN_API_KEY=<your-key> --env OBSIDIAN_HOST=127.0.0.1 --env OBSIDIAN_PORT=27124 -- uvx mcp-obsidian" -ForegroundColor DarkGray
 Write-Host "`n5. Add your private vault at $privatePath as a SEPARATE vault"
 Write-Host "6. Request your Claude.ai data export: Settings > Privacy > Export data"
 Write-Host "   (delivered via email within 24h)"
@@ -64,6 +67,6 @@ Write-Host "7. Request your ChatGPT export: Settings > Data Controls > Export"
 Write-Host "8. When exports arrive, run:`n"
 Write-Host "   `$env:SBO_BRAIN_VAULT_ROOT='$brainPath'" -ForegroundColor DarkGray
 Write-Host "   `$env:SBO_PRIVATE_VAULT_ROOT='$privatePath'" -ForegroundColor DarkGray
-Write-Host "   `$env:ANTHROPIC_API_KEY='<your-key>'" -ForegroundColor DarkGray
+Write-Host "   `$env:ANTHROPIC_API_KEY='<your-key>'   # only needed for --mode api" -ForegroundColor DarkGray
 Write-Host "   sbo-ingest path/to/conversations.json`n" -ForegroundColor DarkGray
 Write-Host "Setup complete." -ForegroundColor Green

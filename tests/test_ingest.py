@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from sbo_ingestion.ingest import ingest
+import pytest
+from click.testing import CliRunner
+
+from sbo_ingestion.ingest import _detect_format, cli, ingest
 from sbo_ingestion.summarize import Summary
 
 
@@ -228,3 +232,159 @@ def test_explicit_mode_overrides_legacy_flags(
     )
     sample = result[0].brain_path.read_text(encoding="utf-8")
     assert "/distill-inbox" in sample  # agent-mode sentinel
+
+
+# ---------------------------------------------------------------------------
+# Sharded exports and format detection
+# ---------------------------------------------------------------------------
+
+
+def test_ingest_directory_of_shards(
+    chatgpt_sharded_dir: Path,
+    tmp_vault_pair: tuple[Path, Path],
+) -> None:
+    """A directory of shards ingests as one run: 1 convo in shard 000, 2 in shard 001."""
+    brain, private = tmp_vault_pair
+    result = ingest(chatgpt_sharded_dir, brain_root=brain, private_root=private)
+    assert len(result) == 3
+    assert len(list((brain / "_inbox" / "chatgpt").glob("*.md"))) == 3
+
+
+def test_ingest_glob_of_shards(
+    chatgpt_sharded_dir: Path,
+    tmp_vault_pair: tuple[Path, Path],
+) -> None:
+    """A glob selects and orders shards the same way a directory does."""
+    brain, private = tmp_vault_pair
+    result = ingest(
+        chatgpt_sharded_dir / "conversations-*.json",
+        brain_root=brain,
+        private_root=private,
+    )
+    assert len(result) == 3
+
+
+def test_shards_processed_in_sorted_order(
+    chatgpt_sharded_dir: Path,
+    tmp_vault_pair: tuple[Path, Path],
+) -> None:
+    """Shard 000 must be ingested before shard 001, whatever order the FS lists them."""
+    brain, private = tmp_vault_pair
+    ingest(chatgpt_sharded_dir, brain_root=brain, private_root=private)
+    sources = [
+        json.loads(line)["source"]
+        for line in (private / "_distill" / "audit.jsonl")
+        .read_text(encoding="utf-8")
+        .strip()
+        .split("\n")
+    ]
+    assert sources == [
+        "conversations-000.json",
+        "conversations-001.json",
+        "conversations-001.json",
+    ]
+
+
+def test_sharded_audit_log_is_one_coherent_run(
+    chatgpt_sharded_dir: Path,
+    tmp_vault_pair: tuple[Path, Path],
+) -> None:
+    """One audit line per conversation across all shards, each naming its shard."""
+    brain, private = tmp_vault_pair
+    ingest(chatgpt_sharded_dir, brain_root=brain, private_root=private)
+    lines = (private / "_distill" / "audit.jsonl").read_text(encoding="utf-8").strip().split("\n")
+    assert len(lines) == 3
+    entries = [json.loads(line) for line in lines]
+    assert {e["action"] for e in entries} == {"ingest"}
+    assert {e["format"] for e in entries} == {"chatgpt"}
+    assert len({e["conversation_id"] for e in entries}) == 3
+
+
+def test_empty_directory_raises(
+    tmp_path: Path,
+    tmp_vault_pair: tuple[Path, Path],
+) -> None:
+    brain, private = tmp_vault_pair
+    empty = tmp_path / "no-exports"
+    empty.mkdir()
+    with pytest.raises(ValueError, match="No .json or .jsonl export files"):
+        ingest(empty, brain_root=brain, private_root=private)
+
+
+def test_array_shaped_claude_export_routes_to_claude(
+    claude_ai_json_export_path: Path,
+    tmp_vault_pair: tuple[Path, Path],
+) -> None:
+    """A JSON array whose objects carry chat_messages is Claude.ai, not ChatGPT."""
+    assert _detect_format(claude_ai_json_export_path) == "claude.ai"
+    brain, private = tmp_vault_pair
+    result = ingest(claude_ai_json_export_path, brain_root=brain, private_root=private)
+    assert len(result) == 2
+    assert len(list((brain / "_inbox" / "claude-ai").glob("*.md"))) == 2
+    assert list((brain / "_inbox" / "chatgpt").glob("*.md")) == []
+
+
+def test_array_shaped_chatgpt_export_still_routes_to_chatgpt(
+    chatgpt_export_path: Path,
+) -> None:
+    """The mapping key keeps ChatGPT arrays on the ChatGPT handler."""
+    assert _detect_format(chatgpt_export_path) == "chatgpt"
+
+
+def test_jsonl_export_routes_to_claude(claude_ai_export_path: Path) -> None:
+    assert _detect_format(claude_ai_export_path) == "claude.ai"
+
+
+# ---------------------------------------------------------------------------
+# api mode is opt-in only — a bare ANTHROPIC_API_KEY must never bill the user
+# ---------------------------------------------------------------------------
+
+
+def test_ambient_api_key_does_not_select_api_mode(
+    claude_ai_export_path: Path,
+    tmp_vault_pair: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An exported ANTHROPIC_API_KEY must leave the default at agent mode."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-should-not-be-used")
+    brain, private = tmp_vault_pair
+    result = CliRunner().invoke(
+        cli,
+        [
+            str(claude_ai_export_path),
+            "--brain-root",
+            str(brain),
+            "--private-root",
+            str(private),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "mode:    agent" in result.output
+    for r in (brain / "_inbox" / "claude-ai").glob("*.md"):
+        assert "needs-summary" in r.read_text(encoding="utf-8")
+
+
+def test_mode_api_without_key_prints_one_line_error(
+    claude_ai_export_path: Path,
+    tmp_vault_pair: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--mode api with no key exits cleanly — a message, not a traceback."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    brain, private = tmp_vault_pair
+    result = CliRunner().invoke(
+        cli,
+        [
+            str(claude_ai_export_path),
+            "--brain-root",
+            str(brain),
+            "--private-root",
+            str(private),
+            "--mode",
+            "api",
+        ],
+    )
+    assert result.exit_code == 1
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert "Traceback" not in result.output
+    assert "[error] mode=api requires --api-key" in result.output

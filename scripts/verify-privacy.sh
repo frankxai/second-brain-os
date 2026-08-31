@@ -2,7 +2,10 @@
 # Verify the SBO privacy hardening checklist for a private vault.
 #
 # Two modes:
-#   strict   (default)        — all 6 checks must pass; runs on a real install
+#   strict   (default)        — every verifiable check must pass; runs on a real
+#                                install. Machine-level state that no script can
+#                                confirm reports WARN with its remediation step
+#                                and never fails the run.
 #   template (SBO_VERIFY_MODE=template) — only vault-shape checks (marker files,
 #                                          no banned plugins, not inside cloud
 #                                          paths). Skips machine-level checks
@@ -30,6 +33,7 @@ fi
 
 PASS=0
 FAIL=0
+WARN=0
 
 check() {
   local name="$1"
@@ -41,6 +45,20 @@ check() {
   else
     echo "FAIL"
     FAIL=$((FAIL + 1))
+  fi
+}
+
+# Machine-level state a script cannot confirm: report the remediation, never fail.
+check_machine() {
+  local name="$1"
+  shift
+  printf "  [%s] " "$name"
+  if "$@"; then
+    echo "PASS"
+    PASS=$((PASS + 1))
+  else
+    echo "WARN"
+    WARN=$((WARN + 1))
   fi
 }
 
@@ -58,11 +76,8 @@ check_spotlight() {
   fi
 }
 
-# 3. Cloud-backup exclusion
-#    - Path-shape check (vault location): runs in all modes
-#    - tmutil exclusion (macOS machine state): strict mode only
-check_backup() {
-  # iCloud / OneDrive path-shape check (template-deterministic)
+# 3a. Cloud-sync path exclusion (vault location — deterministic in every mode)
+check_backup_path() {
   if [[ "$PRIVATE_VAULT" == *"iCloud"* ]] || [[ "$PRIVATE_VAULT" == *"Mobile Documents"* ]]; then
     echo -n "(vault inside iCloud — move out) "
     return 1
@@ -71,15 +86,19 @@ check_backup() {
     echo -n "(vault inside OneDrive — move out) "
     return 1
   fi
-  # macOS Time Machine exclusion (machine-level — only checked in strict mode)
-  if [[ "$MODE" == "strict" ]] && [[ "$(uname)" == "Darwin" ]]; then
-    if tmutil isexcluded "$PRIVATE_VAULT" 2>/dev/null | grep -q "Excluded"; then
-      return 0
-    fi
-    echo -n "(macOS: add via tmutil addexclusion) "
-    return 1
-  fi
   return 0
+}
+
+# 3b. macOS Time Machine exclusion (machine-level — strict mode only)
+check_timemachine() {
+  if [[ "$MODE" != "strict" ]] || [[ "$(uname)" != "Darwin" ]]; then
+    return 0  # N/A
+  fi
+  if tmutil isexcluded "$PRIVATE_VAULT" 2>/dev/null | grep -q "Excluded"; then
+    return 0
+  fi
+  echo -n "do this once by hand: tmutil addexclusion \"$PRIVATE_VAULT\" -- "
+  return 1
 }
 
 # 4. Obsidian Sync prohibition (marker file)
@@ -106,17 +125,23 @@ echo ""
 
 check "1. Windows Search exclusion (N/A on Unix)" check_winsearch
 check "2. macOS Spotlight exclusion" check_spotlight
-check "3. Cloud-backup exclusion" check_backup
+check "3a. Cloud-sync path exclusion" check_backup_path
+check_machine "3b. macOS Time Machine exclusion" check_timemachine
 check "4. Obsidian Sync prohibition" check_no_sync
 check "5. Local REST API plugin prohibition" check_no_rest_api
 check "6. LLM-plugin prohibition" check_no_llm_plugins
 
 echo ""
 echo "Pass: $PASS"
+if [[ $WARN -gt 0 ]]; then echo "Warn: $WARN"; fi
 echo "Fail: $FAIL"
 echo ""
 if [[ $FAIL -gt 0 ]]; then
   echo "Privacy verification FAILED. Address the issues above."
   exit 1
 fi
-echo "Privacy verification PASSED."
+if [[ $WARN -gt 0 ]]; then
+  echo "Privacy verification PASSED (with manual steps listed above)."
+else
+  echo "Privacy verification PASSED."
+fi

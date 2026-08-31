@@ -29,9 +29,20 @@ def parse_export(path: Path) -> Iterator[Conversation]:
 
 
 def _epoch_to_iso(ts: float | None) -> str:
+    """Convert a ChatGPT epoch timestamp, tolerating the bad ones.
+
+    Real exports carry occasional out-of-range `create_time` values, and on
+    Windows `fromtimestamp` raises OSError rather than OverflowError for those.
+    Uncaught, a single bad message aborts the whole import: a 2 GB export died
+    1,494 conversations in, after the audit log had already recorded the
+    preceding ones. An unreadable timestamp is not worth losing an import over.
+    """
     if ts is None:
         return ""
-    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+    try:
+        return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+    except (OSError, OverflowError, ValueError, TypeError):
+        return ""
 
 
 def _walk_mapping(mapping: dict) -> list[dict]:

@@ -1,8 +1,9 @@
-"""Claude.ai JSONL export parser.
+"""Claude.ai export parser.
 
-Claude.ai exports are JSON Lines: one conversation per line, top-level object with
-`uuid`, `name`, `created_at`, `updated_at`, `chat_messages` (array). Each message has
-`uuid`, `text`, `sender` (human|assistant), `created_at`.
+Claude.ai ships either JSON Lines (one conversation per line, `.jsonl`) or a
+single JSON array (`.json`). Each conversation is an object with `uuid`, `name`,
+`created_at`, `updated_at`, `chat_messages` (array). Each message has `uuid`,
+`text`, `sender` (human|assistant), `created_at`.
 """
 
 from __future__ import annotations
@@ -45,8 +46,17 @@ class Conversation:
 
 
 def parse_export(path: Path) -> Iterator[Conversation]:
-    """Yield Conversation objects from a Claude.ai JSONL export file."""
+    """Yield Conversation objects from a Claude.ai export (.jsonl or .json array)."""
     with path.open("r", encoding="utf-8") as f:
+        if path.suffix == ".json":
+            data = json.load(f)
+            if not isinstance(data, list):
+                raise ValueError(
+                    f"Expected top-level JSON array in {path}, got {type(data).__name__}"
+                )
+            for obj in data:
+                yield _parse_conversation(obj)
+            return
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
