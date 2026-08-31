@@ -7,7 +7,8 @@
 - **Obsidian** ≥ 1.6.0 — https://obsidian.md
 - **Python** ≥ 3.11 with `pip` or `uv`
 - **Claude Desktop** OR **Claude Code CLI** (for MCP)
-- **Anthropic API key** — https://console.anthropic.com
+- **`uvx`** (ships with [uv](https://docs.astral.sh/uv/)) — the MCP server runs as `uvx mcp-obsidian`
+- **Anthropic API key** — https://console.anthropic.com — optional, only for `--mode api`
 - **Optional but recommended:** A password manager for the Local REST API key.
 
 ## Day 0 — wire it up (30 min)
@@ -65,9 +66,33 @@ Settings → Community plugins → Local REST API → Settings → copy the API 
 
 ### 6. Wire the MCP server
 
-Add the snippet from `setup.{ps1,sh}` output to your Claude Desktop config (`~/.config/claude/claude_desktop_config.json` on Linux, `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `%APPDATA%\Claude\claude_desktop_config.json` on Windows).
+**Claude Code** — one line, no file editing:
 
-Restart Claude Desktop. The `sbo-obsidian` MCP server should appear in your MCP list.
+```bash
+claude mcp add sbo-obsidian   --env OBSIDIAN_API_KEY=<your-key>   --env OBSIDIAN_HOST=127.0.0.1   --env OBSIDIAN_PORT=27124   -- uvx mcp-obsidian
+```
+
+**Claude Desktop** — add this to your config (`~/.config/claude/claude_desktop_config.json` on Linux, `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `%APPDATA%\Claude\claude_desktop_config.json` on Windows), then restart it:
+
+```json
+{
+  "mcpServers": {
+    "sbo-obsidian": {
+      "command": "uvx",
+      "args": ["mcp-obsidian"],
+      "env": {
+        "OBSIDIAN_API_KEY": "<your-key>",
+        "OBSIDIAN_HOST": "127.0.0.1",
+        "OBSIDIAN_PORT": "27124"
+      }
+    }
+  }
+}
+```
+
+`OBSIDIAN_HOST` is a bare hostname — `mcp-obsidian` composes `https://{host}:{port}` itself. A URL here fails to connect.
+
+The `sbo-obsidian` server should now appear in your MCP list.
 
 ### 7. Add the private vault as a SEPARATE Obsidian vault
 
@@ -85,7 +110,7 @@ Restart Claude Desktop. The `sbo-obsidian` MCP server should appear in your MCP 
 ```bash
 export SBO_BRAIN_VAULT_ROOT=~/second-brain/brain
 export SBO_PRIVATE_VAULT_ROOT=~/second-brain/private
-export ANTHROPIC_API_KEY=<your-key>
+export ANTHROPIC_API_KEY=<your-key>   # only read by --mode api
 
 # Claude.ai (JSONL)
 sbo-ingest ~/Downloads/conversations.jsonl
@@ -101,7 +126,7 @@ Each conversation becomes two files:
 ## Day 1+ — daily flow
 
 - **Anytime:** drop into `brain/_capture.md` whenever a thought passes through.
-- **Sunday:** run `/palace` (Starlight Chronicle) → triage `_inbox/` → promote to atomic notes → `/people-update` and `/patterns-detect`.
+- **Weekly:** run `/distill-inbox` to fill stubs → triage `_inbox/` → promote to atomic notes → `/people-update` and `/patterns-detect` → `/sbo-verify`.
 - **Sensitive content:** copy raw text into the right `private/` folder. Distill anonymized patterns into `private/_distill/pending/`, then manually copy to `brain/patterns/` when ready.
 
 ## Troubleshooting

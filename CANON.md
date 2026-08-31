@@ -23,7 +23,7 @@ None of these are required for SBO compliance. Vault structure (folders + write 
 
 ## Composition rules
 
-If you adopt Arcanea canon (Guardians, Vel'Tara, Hz grounding), do so via `/luminor-board` instead of `/starlight-board` and accept the CC-BY-NC attribution that comes with Arcanea canon.
+If you adopt a third-party canon, keep it in `brain/_meta/` and honour that canon's own licence and attribution terms. SBO adds no requirements of its own.
 
 ## Built on SIP
 

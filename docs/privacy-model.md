@@ -86,7 +86,7 @@ Windows Clipboard History (Win+V), macOS Universal Clipboard, and clipboard mana
 
 ## Verification
 
-Run `scripts/verify-privacy.{ps1,sh}` on your private vault on every Sunday Palace Review.
+Run `scripts/verify-privacy.{ps1,sh}` on your private vault as part of your weekly review.
 
 ## If you suspect a leak
 

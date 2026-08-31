@@ -1,6 +1,6 @@
 {
   "name": "second-brain-os",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "MIT",
   "sip_version": "1.1.1",
   "transport": "stdio",
@@ -15,7 +15,7 @@
       "name": "mcp-obsidian",
       "type": "mcp-server",
       "version": "main",
-      "commit_pin": "PINNED_AT_RELEASE_TIME",
+      "commit_pin": "eb33932a66eebda9eb44745e5d31f5c0fe21fee2",
       "url": "https://github.com/MarkusPfundstein/mcp-obsidian"
     }
   ],

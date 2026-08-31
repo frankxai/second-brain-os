@@ -2,7 +2,7 @@
 
 > One-file append surface. Karpathy-style: no decisions required, just drop.
 
-Drop anything here. Periodic review (weekly Chronicle Palace Review) is the gravity that promotes good captures to atomic notes in `notes/`.
+Drop anything here. Periodic review (weekly) is the gravity that promotes good captures to atomic notes in `notes/`.
 
 Format: timestamp + line. No frontmatter on individual entries. Newer at the top is fine; this file gets long and is not meant to be tidy.
 
