@@ -11,7 +11,7 @@
 3. Click **Export data**.
 4. Confirm. You'll receive an email with a download link.
 
-**Delivery window:** within 24 hours. Link expires 24h after delivery.
+**Delivery:** usually minutes, longer on a large account. The download link expires 24h after it lands.
 
 ### What you get
 
@@ -29,8 +29,6 @@ Each line / record:
 sbo-ingest path/to/conversations.jsonl
 ```
 
-Defaults to `agent` mode — no API call, no cost. See [Ingestion modes](#ingestion-modes).
-
 ## ChatGPT
 
 ### Request the export
@@ -45,65 +43,51 @@ Defaults to `agent` mode — no API call, no cost. See [Ingestion modes](#ingest
 ### What you get
 
 A ZIP archive containing:
-- `conversations.json` — full message history with `mapping` tree per conversation
+- `conversations.json` — legacy single-file full message history; or
+- `conversations-000.json`, `conversations-001.json`, … — current numbered shards,
+  each with the same `mapping` tree per conversation
 - `chat.html` — human-readable browser version (ignore for ingestion)
 
 ### Run ingest
 
 ```bash
-sbo-ingest path/to/conversations.json
+sbo-ingest path/to/the-downloaded-chatgpt-export.zip
 ```
 
-Defaults to `agent` mode — no API call, no cost. See [Ingestion modes](#ingestion-modes).
+Do not extract multi-gigabyte exports first. `sbo-ingest` reads the ZIP directly,
+orders numbered shards deterministically, excludes `shared_conversations.json`,
+and releases each shard's message bodies after their private-vault files are written.
+An already-extracted legacy `conversations.json` remains supported.
 
-## Ingestion modes
+The ZIP layout is validated before ingestion. Mixed legacy/sharded members, nested
+conversation members, duplicate or missing shard indexes, and duplicate conversation
+IDs fail closed instead of silently dropping data. A completed import writes a private
+receipt under `private/_distill/imports/` with the selected members and counts.
 
-`sbo-ingest` runs in one of three modes, selected with `--mode`.
-
-| Mode | Cost | What it writes | When to use |
-|------|------|----------------|-------------|
-| `agent` (**default**) | $0 | Raw + a stub summary stamped `status: needs-summary` | Normal use. You fill the stubs by running `/distill-inbox` in any coding-agent session. |
-| `api` | ~$0.005/conversation | Raw + a real summary from the Anthropic API | Unattended batch runs where no agent session will follow. |
-| `dry-run` | $0 | Raw + a stub that says summarization was skipped | Smoke-testing the installation. |
-
-`agent` is the default because the summarization happens inside a coding-agent
-session you are already paying for. `api` is **never** selected implicitly — a
-stray `ANTHROPIC_API_KEY` in your environment does not switch modes; only an
-explicit `--mode api` does, and that mode errors out if no key is supplied.
-
-```bash
-sbo-ingest path/to/conversations.jsonl                 # agent mode (default)
-sbo-ingest path/to/conversations.jsonl --mode dry-run  # no summaries at all
-sbo-ingest path/to/conversations.jsonl --mode api      # requires an API key
-```
+Re-running an export preserves curated work: raw source files are refreshed with an
+atomic replace, while an existing brain note with the same conversation ID is kept.
+The lookup covers promoted notes across the brain vault, and the summary path is
+identity-addressed, so moves or title changes do not fork a second note.
 
 ## What happens during ingest
 
 For each conversation:
 
 1. **Parse** the raw export into a `Conversation` object (handler).
-2. **Summarize** according to the mode — a stub in `agent` / `dry-run`, an
-   Anthropic API call in `api`.
+2. **Summarize** via Anthropic API (Haiku, cached system prompt).
 3. **Voice-check** the summary against the AI-slop banned-phrase list.
 4. **Dual-write:**
    - `private/chat-history/{platform}/YYYY-MM-DD-{conversation-id}.md` (full raw)
-   - `brain/_inbox/{platform}/YYYY-MM-DD-{slug}.md` (summary + insights)
+   - `brain/_inbox/{platform}/YYYY-MM-DD-{conversation-token}.md` (summary + insights)
 
 The brain file links to the private file by relative path. Your MCP server cannot resolve the link (that's the privacy contract).
 
-## Filling agent-mode stubs
-
-After an `agent`-mode ingest, brain stubs carry `status: needs-summary`. Open a
-coding-agent session (Claude Code, Cursor, Codex, Gemini CLI — see
-`docs/cross-ai-portability.md`) and run `/distill-inbox`. The agent reads the raw
-private file, writes the real summary into the brain stub, and clears the status.
-
 ## Cost considerations
 
-- Default `agent` mode costs **$0** — no API call is made at ingest time.
-- `--mode api` uses `claude-haiku-4-5-20251001`. A typical 50-message
-  conversation costs ~$0.005; 1,000 conversations ≈ $5, less with prompt-cache
-  hits on the system prompt within ~5 minute windows.
+- Default model: `claude-haiku-4-5-20251001` — cheap.
+- Prompt caching reduces re-cost for the system prompt significantly on subsequent calls within ~5 min windows.
+- A typical 50-message conversation costs ~$0.005 to summarize.
+- 1,000 conversations ≈ $5 first-time, less with cache utilization.
 
 ## Selective ingest
 
@@ -117,7 +101,7 @@ sbo-ingest recent.jsonl
 
 ## Re-ingest behavior
 
-Files are overwritten if you run ingest twice on the same conversation. Re-running an `agent`-mode ingest also resets a stub to `status: needs-summary`, so distill before you re-ingest. The brain file's `imported` frontmatter updates; the private file's `imported` updates too. Conversation IDs are stable, so no duplication.
+Files are overwritten if you run ingest twice on the same conversation. The brain file's `imported` frontmatter updates; the private file's `imported` updates too. Conversation IDs are stable, so no duplication.
 
 ## Phase 2 — when MCP-to-MCP memory bridges exist
 

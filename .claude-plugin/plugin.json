@@ -1,6 +1,6 @@
 {
   "name": "second-brain-os",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Second Brain OS — a build-in-public AI second-brain template for Obsidian. Two-vault hard privacy separation (public-share + private-substrate). Coding-agent-native. Composes the Starlight Intelligence Protocol (SIP) substrate.",
   "author": {
     "name": "Frank Riemer",

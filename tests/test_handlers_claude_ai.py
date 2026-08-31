@@ -49,6 +49,18 @@ def test_short_conversation_parses_correctly(claude_ai_export_path: Path) -> Non
     assert len(second.messages) == 2
 
 
+def test_conversation_captures_export_summary(claude_ai_export_path: Path) -> None:
+    """The export's per-conversation `summary` field is captured onto Conversation."""
+    convos = list(parse_export(claude_ai_export_path))
+    assert convos[0].summary.startswith("Two-vault architecture")
+
+
+def test_conversation_summary_defaults_empty(claude_ai_export_path: Path) -> None:
+    """Conversations with no `summary` in the export get an empty string, not None."""
+    convos = list(parse_export(claude_ai_export_path))
+    assert convos[1].summary == ""  # second fixture conversation has no summary field
+
+
 def test_message_is_immutable() -> None:
     msg = Message(uuid="x", sender="human", text="hi", created_at="2026-05-11T00:00:00Z")
     try:

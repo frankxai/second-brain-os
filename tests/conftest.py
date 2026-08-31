@@ -23,6 +23,18 @@ def chatgpt_export_path() -> Path:
 
 
 @pytest.fixture
+def memories_list_path() -> Path:
+    """Path to a memories.json fixture in top-level-list shape."""
+    return FIXTURES_DIR / "memories-list-sample.json"
+
+
+@pytest.fixture
+def memories_dict_path() -> Path:
+    """Path to a memories.json fixture in wrapper-dict shape."""
+    return FIXTURES_DIR / "memories-dict-sample.json"
+
+
+@pytest.fixture
 def tmp_vault_pair(tmp_path: Path) -> tuple[Path, Path]:
     """Create empty brain/ and private/ vault skeletons in a tmp dir.
 

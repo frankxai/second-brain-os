@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import frontmatter
@@ -101,3 +102,121 @@ def test_brain_frontmatter_status_is_triage(tmp_vault_pair: tuple[Path, Path]) -
     post = frontmatter.load(result.brain_path)
     assert post.metadata["status"] == "triage"
     assert "needs-triage" in post.metadata["tags"]
+
+
+def _convo_with_summary() -> Conversation:
+    return Conversation(
+        uuid="sum-1",
+        title="Has an export summary",
+        created_at="2026-05-12T10:00:00Z",
+        updated_at="2026-05-12T10:30:00Z",
+        platform="claude.ai",
+        summary="The export's own one-line summary of this chat.",
+        messages=(
+            Message(uuid="m1", sender="human", text="Hi", created_at="2026-05-12T10:00:00Z"),
+        ),
+    )
+
+
+def test_brain_frontmatter_carries_export_summary(tmp_vault_pair: tuple[Path, Path]) -> None:
+    """When the conversation has an export summary, it lands in brain frontmatter."""
+    brain, private = tmp_vault_pair
+    result = write_pair(
+        _convo_with_summary(), _summary(), brain_root=brain, private_root=private
+    )
+    post = frontmatter.load(result.brain_path)
+    assert post.metadata["summary"] == "The export's own one-line summary of this chat."
+
+
+def test_brain_frontmatter_omits_summary_when_absent(tmp_vault_pair: tuple[Path, Path]) -> None:
+    """No export summary -> no empty `summary:` key polluting frontmatter."""
+    brain, private = tmp_vault_pair
+    result = write_pair(_convo(), _summary(), brain_root=brain, private_root=private)
+    post = frontmatter.load(result.brain_path)
+    assert "summary" not in post.metadata
+
+
+def test_repeated_title_does_not_overwrite_another_conversation(
+    tmp_vault_pair: tuple[Path, Path],
+) -> None:
+    brain, private = tmp_vault_pair
+    first = write_pair(_convo(), _summary(), brain_root=brain, private_root=private)
+    second_convo = replace(_convo(), uuid="different-456")
+    second = write_pair(second_convo, _summary(), brain_root=brain, private_root=private)
+
+    assert first.brain_path != second.brain_path
+    assert first.brain_path.exists()
+    assert second.brain_path.exists()
+    assert frontmatter.load(first.brain_path).metadata["conversation_id"] == "abc-123"
+    assert frontmatter.load(second.brain_path).metadata["conversation_id"] == "different-456"
+
+    reingested = write_pair(
+        second_convo, _summary(), brain_root=brain, private_root=private
+    )
+    assert reingested.brain_path == second.brain_path
+    assert reingested.brain_preserved is True
+
+
+def test_reingest_preserves_distilled_brain_note(
+    tmp_vault_pair: tuple[Path, Path],
+) -> None:
+    brain, private = tmp_vault_pair
+    first = write_pair(_convo(), _summary(), brain_root=brain, private_root=private)
+    distilled = frontmatter.load(first.brain_path)
+    distilled["status"] = "distilled"
+    distilled.content = "# Curated insight\n\nThis must survive re-ingestion.\n"
+    first.brain_path.write_text(frontmatter.dumps(distilled), encoding="utf-8")
+
+    reingested = write_pair(
+        _convo(),
+        replace(_summary(), tldr="A newly generated replacement."),
+        brain_root=brain,
+        private_root=private,
+    )
+
+    preserved = frontmatter.load(reingested.brain_path)
+    assert reingested.brain_preserved is True
+    assert preserved["status"] == "distilled"
+    assert "This must survive re-ingestion." in preserved.content
+    assert "newly generated replacement" not in preserved.content
+
+
+def test_changed_summary_title_keeps_identity_addressed_brain_path(
+    tmp_vault_pair: tuple[Path, Path],
+) -> None:
+    brain, private = tmp_vault_pair
+    first = write_pair(_convo(), _summary(), brain_root=brain, private_root=private)
+    renamed = write_pair(
+        _convo(),
+        replace(_summary(), title="A completely different generated title"),
+        brain_root=brain,
+        private_root=private,
+    )
+
+    assert renamed.brain_path == first.brain_path
+    assert renamed.brain_preserved is True
+
+
+def test_path_like_conversation_id_cannot_escape_vault(
+    tmp_vault_pair: tuple[Path, Path],
+) -> None:
+    brain, private = tmp_vault_pair
+    unsafe = replace(_convo(), uuid="../../outside/secret")
+    result = write_pair(unsafe, _summary(), brain_root=brain, private_root=private)
+
+    assert result.private_path.resolve().is_relative_to(private.resolve())
+    assert result.brain_path.resolve().is_relative_to(brain.resolve())
+    assert ".." not in result.private_path.name
+
+
+def test_path_like_timestamp_cannot_escape_vault(
+    tmp_vault_pair: tuple[Path, Path],
+) -> None:
+    brain, private = tmp_vault_pair
+    unsafe = replace(_convo(), created_at="../../outside")
+    result = write_pair(unsafe, _summary(), brain_root=brain, private_root=private)
+
+    assert result.private_path.resolve().is_relative_to(private.resolve())
+    assert result.brain_path.resolve().is_relative_to(brain.resolve())
+    assert result.private_path.name.startswith("undated-")
+    assert result.brain_path.name.startswith("undated-")
