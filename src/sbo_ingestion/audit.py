@@ -15,6 +15,7 @@ Schema (one JSON object per line):
     "format":          "claude.ai" | "chatgpt"        (ingest only),
     "raw_path":        relative path to private file  (ingest only),
     "brain_path":      relative path to brain file    (ingest only),
+    "source":          export file the conversation came from (ingest only),
     "model":           model identifier               (distill only, optional),
     "agent":           agent identifier               (distill only, optional),
     "summary_chars":   int                            (distill only, optional)
@@ -60,6 +61,7 @@ def record_ingest(
     fmt: str,
     raw_path: Path,
     brain_path: Path,
+    source: str,
     private_root_for_rel: Path | None = None,
     brain_root_for_rel: Path | None = None,
 ) -> Path:
@@ -75,6 +77,7 @@ def record_ingest(
             "format": fmt,
             "raw_path": raw_rel,
             "brain_path": brain_rel,
+            "source": source,
         },
     )
 
