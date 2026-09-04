@@ -335,7 +335,8 @@ def test_ingest_directory_of_shards(
     brain, private = tmp_vault_pair
     result = ingest(chatgpt_sharded_dir, brain_root=brain, private_root=private)
     assert len(result) == 3
-    assert len(list((brain / "_inbox" / "chatgpt").glob("*.md"))) == 3
+    stubs = [p for p in (brain / "_inbox" / "chatgpt").glob("*.md") if p.name != "_INDEX.md"]
+    assert len(stubs) == 3
 
 
 def test_ingest_glob_of_shards(
@@ -408,7 +409,8 @@ def test_array_shaped_claude_export_routes_to_claude(
     brain, private = tmp_vault_pair
     result = ingest(claude_ai_json_export_path, brain_root=brain, private_root=private)
     assert len(result) == 2
-    assert len(list((brain / "_inbox" / "claude-ai").glob("*.md"))) == 2
+    stubs = [p for p in (brain / "_inbox" / "claude-ai").glob("*.md") if p.name != "_INDEX.md"]
+    assert len(stubs) == 2
     assert list((brain / "_inbox" / "chatgpt").glob("*.md")) == []
 
 
@@ -449,6 +451,8 @@ def test_ambient_api_key_does_not_select_api_mode(
     assert result.exit_code == 0, result.output
     assert "mode:    agent" in result.output
     for r in (brain / "_inbox" / "claude-ai").glob("*.md"):
+        if r.name == "_INDEX.md":  # derived corpus map, carries no stub status
+            continue
         assert "needs-summary" in r.read_text(encoding="utf-8")
 
 

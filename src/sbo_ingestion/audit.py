@@ -66,6 +66,7 @@ def record_ingest(
     private_root_for_rel: Path | None = None,
     brain_root_for_rel: Path | None = None,
     brain_preserved: bool = False,
+    source: str = "",
 ) -> Path:
     """Convenience wrapper for the canonical ingest event shape."""
     raw_rel = _relpath(raw_path, private_root_for_rel or private_root)
@@ -80,6 +81,7 @@ def record_ingest(
             "raw_path": raw_rel,
             "brain_path": brain_rel,
             "brain_preserved": brain_preserved,
+            "source": source,
         },
     )
 

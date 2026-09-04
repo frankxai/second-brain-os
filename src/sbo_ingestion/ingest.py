@@ -197,6 +197,7 @@ def ingest(
                 private_root=private_root,
                 api_key=api_key,
                 effective_mode=effective_mode,
+                memories_path=memories_path,
             )
         )
     return results
@@ -209,6 +210,7 @@ def _ingest_file(
     private_root: Path,
     api_key: str,
     effective_mode: Mode,
+    memories_path: Path | None = None,
 ) -> list[DualWriteResult]:
     """Ingest a single export file with an already-resolved mode."""
     fmt = _detect_format(export_path)
@@ -260,9 +262,9 @@ def _ingest_file(
             raw_path=result.private_path,
             brain_path=result.brain_path,
             source=export_path.name,
+            brain_preserved=result.brain_preserved,
             private_root_for_rel=private_root,
             brain_root_for_rel=brain_root,
-            brain_preserved=result.brain_preserved,
         )
         results.append(result)
         # Keep only index metadata. Message bodies may be gigabytes across a full

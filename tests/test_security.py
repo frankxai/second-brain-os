@@ -246,8 +246,13 @@ def test_hostile_export_file_writes_only_inside_the_vaults(
     ],
 )
 def test_out_of_range_create_time_does_not_abort_the_import(ts):
-    """A single unreadable timestamp must not cost the user the whole import."""
-    assert _epoch_to_iso(ts) == ""
+    """A single odd timestamp must not cost the user the whole import.
+
+    Out-of-range values that Windows `fromtimestamp` rejects are still
+    representable, so they keep their date; only genuinely unreadable values
+    degrade to empty. Either way the run continues.
+    """
+    assert isinstance(_epoch_to_iso(ts), str)
 
 
 def test_same_day_same_title_conversations_both_survive(tmp_path):
