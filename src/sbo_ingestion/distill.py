@@ -8,14 +8,16 @@ cost nothing extra — the session is already paid for.
 It leaves two things that must not be left to the agent's discretion. Finding
 the stubs that still need work is fiddly frontmatter parsing, and recording the
 audit event is the kind of bookkeeping an agent skips when a run gets long. Both
-live here, and `complete` does the status flip and the audit write together so
-neither can happen without the other.
+live here. Completion first saves the note atomically, then records an idempotent
+audit event. A marker on the note makes an interrupted audit recoverable on retry.
 """
 
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from pathlib import Path
+from uuid import uuid4
 
 import click
 import frontmatter
@@ -26,6 +28,7 @@ NEEDS_SUMMARY = "needs-summary"
 # Frontmatter sits at the top of the file; this is generous for it.
 FRONTMATTER_PEEK = 2048
 DONE_STATUS = "triage"
+PENDING_RECEIPT = "distill_pending_receipt"
 
 
 def find_stubs(brain_root: Path, *, limit: int = 0) -> list[dict]:
@@ -45,10 +48,10 @@ def find_stubs(brain_root: Path, *, limit: int = 0) -> list[dict]:
     for path in sorted(inbox.rglob("*.md")):
         with path.open("r", encoding="utf-8") as handle:
             head = handle.read(FRONTMATTER_PEEK)
-        if needle not in head:
+        if needle not in head and PENDING_RECEIPT not in head:
             continue
         post = frontmatter.load(path)
-        if post.get("status") != NEEDS_SUMMARY:
+        if post.get("status") != NEEDS_SUMMARY and not post.get(PENDING_RECEIPT):
             continue
         pending.append(
             {
@@ -56,6 +59,7 @@ def find_stubs(brain_root: Path, *, limit: int = 0) -> list[dict]:
                 "conversation_id": post.get("conversation_id", ""),
                 "private_file": post.get("private_file", ""),
                 "title": post.get("title") or path.stem,
+                "receipt_pending": bool(post.get(PENDING_RECEIPT)),
             }
         )
         if limit and len(pending) >= limit:
@@ -64,24 +68,55 @@ def find_stubs(brain_root: Path, *, limit: int = 0) -> list[dict]:
 
 
 def complete_stub(stub_path: Path, private_root: Path, *, agent: str, model: str = "") -> Path:
-    """Mark one stub distilled and record it. Both, or neither."""
-    post = frontmatter.load(stub_path)
-    if post.get("status") != NEEDS_SUMMARY:
-        raise click.ClickException(f"{stub_path.name} is not awaiting a summary")
+    """Save the note before its receipt, recovering interrupted work on retry."""
+    stub_path = stub_path.resolve()
+    private_root = private_root.resolve()
+    with audit.exclusive_lock(stub_path.with_suffix(".distill.lock")):
+        post = frontmatter.load(stub_path)
+        pending = post.get(PENDING_RECEIPT)
+        digest = sha256(post.content.encode("utf-8")).hexdigest()
+        vault_digest = sha256(str(private_root).encode("utf-8")).hexdigest()
+        if pending:
+            string_fields = {"completion_id", "conversation_id", "agent", "model",
+                             "summary_sha256", "private_root_sha256"}
+            if (not isinstance(pending, dict)
+                    or set(pending) != string_fields | {"summary_chars"}
+                    or any(not isinstance(pending.get(key), str) for key in string_fields)
+                    or type(pending.get("summary_chars")) is not int
+                    or pending["summary_chars"] < 0
+                    or not pending["completion_id"]):
+                raise click.ClickException("Invalid pending completion marker; restore the note before retrying")
+            if (post.get("status") != DONE_STATUS
+                    or pending["summary_sha256"] != digest
+                    or pending["private_root_sha256"] != vault_digest
+                    or pending["conversation_id"] != str(post.get("conversation_id", ""))):
+                raise click.ClickException("Pending completion changed; restore its note and vault before retrying")
+        else:
+            if post.get("status") != NEEDS_SUMMARY:
+                raise click.ClickException(f"{stub_path.name} is not awaiting a summary")
+            pending = {
+                "completion_id": uuid4().hex,
+                "conversation_id": str(post.get("conversation_id", "")),
+                "agent": agent,
+                "model": model,
+                "summary_chars": len(post.content),
+                "summary_sha256": digest,
+                "private_root_sha256": vault_digest,
+            }
+            post[PENDING_RECEIPT] = pending
+            post["status"] = DONE_STATUS
+            tags = [t for t in (post.get("tags") or []) if t != NEEDS_SUMMARY]
+            post["tags"] = tags or ["triage"]
+            audit.atomic_write_text(stub_path, frontmatter.dumps(post))
 
-    post["status"] = DONE_STATUS
-    tags = [t for t in (post.get("tags") or []) if t != NEEDS_SUMMARY]
-    post["tags"] = tags or ["triage"]
-
-    receipt = audit.record_distill(
-        private_root,
-        conversation_id=str(post.get("conversation_id", "")),
-        agent=agent,
-        model=model,
-        summary_chars=len(post.content),
-    )
-    stub_path.write_text(frontmatter.dumps(post), encoding="utf-8")
-    return receipt
+        receipt = audit.record_distill(
+            private_root,
+            **{key: value for key, value in pending.items()
+               if key not in {"summary_sha256", "private_root_sha256"}},
+        )
+        del post[PENDING_RECEIPT]
+        audit.atomic_write_text(stub_path, frontmatter.dumps(post))
+        return receipt
 
 
 @click.group()
