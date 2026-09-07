@@ -24,4 +24,4 @@
 
 ## Weekly ritual
 
-Every Sunday: `/palace` (Starlight Chronicle weekly review). Triage `_inbox/` → atomic notes. Move private content to the `private/` vault manually.
+Once a week: triage `_inbox/` → atomic notes, then run `/people-update` and `/patterns-detect`. Move private content to the `private/` vault manually.

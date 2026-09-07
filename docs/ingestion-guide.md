@@ -11,7 +11,7 @@
 3. Click **Export data**.
 4. Confirm. You'll receive an email with a download link.
 
-**Delivery window:** within 24 hours. Link expires 24h after delivery.
+**Delivery:** usually minutes, longer on a large account. The download link expires 24h after it lands.
 
 ### What you get
 

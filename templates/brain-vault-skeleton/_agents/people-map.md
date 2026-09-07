@@ -5,7 +5,7 @@
 ## Trigger
 
 - `/people-update` slash command (manual).
-- Weekly via Starlight Chronicle Palace Review.
+- Weekly, as part of your review cadence.
 
 ## Reads
 

@@ -15,7 +15,7 @@
       "name": "mcp-obsidian",
       "type": "mcp-server",
       "version": "main",
-      "commit_pin": "PINNED_AT_RELEASE_TIME",
+      "commit_pin": "eb33932a66eebda9eb44745e5d31f5c0fe21fee2",
       "url": "https://github.com/MarkusPfundstein/mcp-obsidian"
     }
   ],

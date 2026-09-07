@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import json
 import os
+import stat
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -41,6 +43,46 @@ def _now() -> str:
     return datetime.now(tz=UTC).isoformat()
 
 
+@contextmanager
+def exclusive_lock(path: Path):
+    """Serialize cooperating processes; the OS releases the lock after a crash."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as handle:
+        if handle.seek(0, os.SEEK_END) == 0:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            if os.name == "nt":
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    """Flush a complete replacement before touching the original file."""
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600
+    try:
+        with temporary.open("x", encoding="utf-8", newline="") as handle:
+            os.chmod(temporary, mode)
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def append(private_root: Path, entry: dict[str, Any]) -> Path:
     """Append one JSON object to the audit log. Creates the parent dir as needed.
 
@@ -50,8 +92,21 @@ def append(private_root: Path, entry: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"ts": _now(), **entry}
     line = json.dumps(payload, ensure_ascii=False, sort_keys=False)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(line + "\n")
+    with exclusive_lock(path.with_suffix(".lock")):
+        completion_id = entry.get("completion_id")
+        if not completion_id:
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
+            return path
+        previous = path.read_text(encoding="utf-8") if path.exists() else ""
+        if completion_id and any(
+            json.loads(item).get("completion_id") == completion_id
+            for item in previous.splitlines() if item.strip()
+        ):
+            return path
+        # Logical append, atomic physical replacement: an interrupted write cannot
+        # leave a partial JSON line that defeats a completion retry.
+        atomic_write_text(path, previous + line + "\n")
     return path
 
 
@@ -66,6 +121,7 @@ def record_ingest(
     private_root_for_rel: Path | None = None,
     brain_root_for_rel: Path | None = None,
     brain_preserved: bool = False,
+    source: str = "",
 ) -> Path:
     """Convenience wrapper for the canonical ingest event shape."""
     raw_rel = _relpath(raw_path, private_root_for_rel or private_root)
@@ -80,6 +136,7 @@ def record_ingest(
             "raw_path": raw_rel,
             "brain_path": brain_rel,
             "brain_preserved": brain_preserved,
+            "source": source,
         },
     )
 
@@ -133,6 +190,7 @@ def record_distill(
     agent: str = "unknown",
     model: str = "",
     summary_chars: int = 0,
+    completion_id: str = "",
 ) -> Path:
     """Convenience wrapper for the canonical distill event shape.
 
@@ -147,6 +205,8 @@ def record_distill(
         entry["model"] = model
     if summary_chars:
         entry["summary_chars"] = summary_chars
+    if completion_id:
+        entry["completion_id"] = completion_id
     return append(private_root, entry)
 
 

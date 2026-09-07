@@ -16,12 +16,12 @@ Inside your personal `second-brain/brain/` vault:
 brain/
 └── .claude/
     ├── commands/
-    │   ├── library-add.md       → symlink to ~/FrankX/.claude/commands/library-add.md
-    │   ├── library-deepen.md    → symlink to ~/FrankX/.claude/commands/library-deepen.md
-    │   ├── library-research.md  → symlink to ~/FrankX/.claude/commands/library-research.md
-    │   ├── palace.md            → symlink to ~/FrankX/.claude/commands/palace.md
-    │   ├── chronicle.md         → symlink to ~/FrankX/.claude/commands/chronicle.md
-    │   └── bless.md             → symlink to ~/FrankX/.claude/commands/bless.md
+    │   ├── library-add.md       → symlink to /path/to/library-os/.claude/commands/library-add.md
+    │   ├── library-deepen.md    → symlink to /path/to/library-os/.claude/commands/library-deepen.md
+    │   ├── library-research.md  → symlink to /path/to/library-os/.claude/commands/library-research.md
+    │   ├── palace.md            → symlink to /path/to/library-os/.claude/commands/palace.md
+    │   ├── chronicle.md         → symlink to /path/to/library-os/.claude/commands/chronicle.md
+    │   └── bless.md             → symlink to /path/to/library-os/.claude/commands/bless.md
     └── skills/
         ├── library-os/          → symlink to ~/.claude/skills/library-os/
         ├── starlight-chronicle/ → symlink to ~/.claude/skills/starlight-chronicle/
@@ -34,7 +34,7 @@ brain/
 $brain = "$HOME/second-brain/brain"
 
 # Library OS commands
-New-Item -ItemType SymbolicLink -Path "$brain/.claude/commands/library-add.md" -Target "$HOME/FrankX/.claude/commands/library-add.md"
+New-Item -ItemType SymbolicLink -Path "$brain/.claude/commands/library-add.md" -Target "/path/to/library-os/.claude/commands/library-add.md"
 # (repeat for library-deepen, library-research, palace, chronicle, bless)
 
 # Skills
@@ -48,7 +48,7 @@ New-Item -ItemType SymbolicLink -Path "$brain/.claude/skills/library-os" -Target
 brain=~/second-brain/brain
 
 # Library OS commands
-ln -s ~/FrankX/.claude/commands/library-add.md "$brain/.claude/commands/library-add.md"
+ln -s /path/to/library-os/.claude/commands/library-add.md "$brain/.claude/commands/library-add.md"
 # (etc.)
 
 # Skills
@@ -66,15 +66,15 @@ Your Claude Desktop config can hold multiple MCP servers. The personal SBO insta
     "sbo-obsidian": {
       "command": "uvx",
       "args": ["mcp-obsidian"],
-      "env": { "OBSIDIAN_API_KEY": "...", "OBSIDIAN_HOST": "https://localhost:27124" }
+      "env": { "OBSIDIAN_API_KEY": "...", "OBSIDIAN_HOST": "127.0.0.1", "OBSIDIAN_PORT": "27124" }
     },
     "memory-bus": {
       "command": "python",
-      "args": ["C:/Users/frank/Starlight-Intelligence-System/private/memory-bus/server.py"]
+      "args": ["/path/to/Starlight-Intelligence-System/memory-bus/server.py"]
     },
     "starlight-substrate": {
       "command": "node",
-      "args": ["C:/Users/frank/Starlight-Intelligence-System/dist/starlight-mcp.js"]
+      "args": ["/path/to/Starlight-Intelligence-System/dist/starlight-mcp.js"]
     }
   }
 }
@@ -88,13 +88,13 @@ If you have the Family Tree skill installed, your `brain/_meta/family.md` can so
 
 ```yaml
 ---
-source: ~/FrankX/.frankx/family/
+source: /path/to/your-kinship-data/
 agent: family-tree
 ---
 
 # Family
 
-(Auto-generated. Sources from .frankx/family/*.md.)
+(Auto-generated. Sources from your kinship-data source.)
 ```
 
 The `family-tree` skill keeps this file in sync. See `~/.claude/skills/family-tree/SKILL.md`.

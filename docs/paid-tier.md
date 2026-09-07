@@ -77,7 +77,7 @@ That's a complete substrate. You can use SBO indefinitely without paying anythin
 2. You receive an install token + npm package access.
 3. Install: `npx @frankx/second-brain-pro install` (in your brain vault root).
 4. The installer drops 8 agent contracts into `_agents/` and 8 slash commands into `.claude/commands/`.
-5. You run them via Starlight Chronicle Palace Review or on-demand.
+5. You run them on your weekly review cadence, or on demand.
 
 ## Pricing (planned)
 

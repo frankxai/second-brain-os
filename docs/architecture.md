@@ -7,7 +7,7 @@
 | Edge | Direction | Who writes | One rule |
 |---|---|---|---|
 | **Input edge** | World → `brain/_inbox/` + `_capture.md` | Human (you) + ingestion script | No decisions required. Drop anything. |
-| **Distillation** | `_inbox/` → atomic notes; `private/` → `brain/patterns/` | Human, Claude Code assists | Triggered by Sunday Palace Review. You ratify every move. |
+| **Distillation** | `_inbox/` → atomic notes; `private/` → `brain/patterns/` | Human, Claude Code assists | Triggered by your weekly review. You ratify every move. |
 | **Output edge** | `brain/notes/` → `brain/people/`, `brain/patterns/`, `brain/_meta/` | Agents (MCP-wired, never editing input edge) | Agents only write to their assigned folders. Never edit human notes. |
 
 ## Two vaults
@@ -65,6 +65,6 @@ See `composition-guide.md` for the wiring.
 
 ## Phase 2 seam
 
-When Anthropic / OpenAI ship MCP-to-MCP memory bridges, SBO will add `handlers/claude_memory_mcp.py` etc. without changing the public `ingest()` API. The JSON-dump path stays as a bridge. See `MEMORY.md` "Open forks".
+When Anthropic / OpenAI ship MCP-to-MCP memory bridges, SBO will add `handlers/claude_memory_mcp.py` etc. without changing the public `ingest()` API. The JSON-dump path stays as a bridge.
 
 Built on SIP.

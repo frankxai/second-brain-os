@@ -1,0 +1,74 @@
+[
+  {
+    "id": "conv-shard0-0001",
+    "title": "Sharded export shard zero",
+    "create_time": 1778486400.0,
+    "update_time": 1778486700.0,
+    "mapping": {
+      "root": {
+        "id": "root",
+        "message": null,
+        "parent": null,
+        "children": [
+          "conv-shard0-0001-1"
+        ]
+      },
+      "conv-shard0-0001-1": {
+        "id": "conv-shard0-0001-1",
+        "message": {
+          "id": "conv-shard0-0001-1",
+          "author": {
+            "role": "user",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1778486400.0,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "Why does my ChatGPT export contain 54 files?"
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1.0,
+          "metadata": {},
+          "recipient": "all"
+        },
+        "parent": "root",
+        "children": [
+          "conv-shard0-0001-2"
+        ]
+      },
+      "conv-shard0-0001-2": {
+        "id": "conv-shard0-0001-2",
+        "message": {
+          "id": "conv-shard0-0001-2",
+          "author": {
+            "role": "assistant",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1778486420.0,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "Exports over a size threshold are sharded into conversations-000.json through conversations-053.json."
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1.0,
+          "metadata": {},
+          "recipient": "all"
+        },
+        "parent": "conv-shard0-0001-1",
+        "children": []
+      }
+    },
+    "moderation_results": [],
+    "current_node": "conv-shard0-0001-2"
+  }
+]

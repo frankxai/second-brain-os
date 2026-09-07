@@ -48,7 +48,7 @@ body:
     attributes:
       label: Privacy verification
       options:
-        - label: I ran `bash scripts/verify-privacy.sh` (or `.ps1`) and it passes 6/6
+        - label: I ran `bash scripts/verify-privacy.sh` (or `.ps1`) and it reports zero failures
           required: false
         - label: This bug does NOT involve sharing the content of my private vault
           required: true

@@ -16,7 +16,7 @@ You MUST respect folder write zones. Read `brain/CLAUDE.md` for the binding cont
 | `_inbox/claude-ai/`, `_inbox/chatgpt/` | Ingestion-script-only | Read-only for you. Never edit. |
 | `people/`, `patterns/`, `_meta/` | Agent-only | You write here, on your assigned agent's behalf. |
 | `_moc/` | Mixed | You may refresh link lists; never alter human-written structure. |
-| `_archive/` | Read-only for you | Frank moves notes here manually. |
+| `_archive/` | Read-only for you | The vault owner moves notes here manually. |
 | `private/` (separate vault) | NEVER | This path is not served by your MCP. If you can resolve it, escalate to the human — something is misconfigured. |
 
 ## Privacy contract (non-waivable)

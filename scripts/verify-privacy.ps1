@@ -7,10 +7,13 @@
 
 .NOTES
   Two modes:
-    strict   (default)        — all 6 checks must pass; for a real install
+    strict   (default)        — every verifiable check must pass; for a real install
     template (SBO_VERIFY_MODE=template env var) — only vault-shape checks.
                                 Skips Windows Search exclusion (machine-level).
                                 Used by CI on the template skeleton.
+
+  Machine-level checks that no script can confirm report WARN with their
+  remediation step, and never fail the run.
 
 .EXAMPLE
   pwsh ./scripts/verify-privacy.ps1 -PrivateVault "$HOME/second-brain/private"
@@ -28,6 +31,7 @@ param(
 $ErrorActionPreference = "Stop"
 $script:fail = 0
 $script:pass = 0
+$script:warn = 0
 $script:skipped = 0
 $Mode = if ($env:SBO_VERIFY_MODE) { $env:SBO_VERIFY_MODE } else { "strict" }
 
@@ -44,6 +48,9 @@ function Check {
     if ($result -eq $true) {
       Write-Host "PASS" -ForegroundColor Green
       $script:pass++
+    } elseif ($MachineLevel) {
+      Write-Host ("WARN -- " + $result) -ForegroundColor Yellow
+      $script:warn++
     } else {
       Write-Host ("FAIL -- " + $result) -ForegroundColor Red
       $script:fail++
@@ -65,10 +72,9 @@ if (-not (Test-Path $PrivateVault)) {
 Check "1. Windows Search exclusion" -MachineLevel {
   # Machine-level: Windows Search exclusion lives in registry under
   # HKLM:\SOFTWARE\Microsoft\Windows Search\CrawlScopeManager.
-  # Programmatic verification is brittle across Windows builds — the canonical
-  # check is documented manual setup. Strict mode flags this for user review;
-  # template mode (CI) skips it.
-  return "manual verification needed: Settings > Search > Searching Windows > Excluded folders should contain $PrivateVault"
+  # Programmatic verification is brittle across Windows builds, so this can only
+  # ever warn — strict mode surfaces the remediation, template mode (CI) skips it.
+  return "do this once by hand: Settings > Search > Searching Windows > Excluded folders -- add $PrivateVault"
 }
 
 Check "2. macOS Spotlight exclusion" {
@@ -113,6 +119,7 @@ Check "6. Smart Connections / Text Generator prohibition" {
 
 Write-Host ""
 Write-Host "Pass:    $script:pass" -ForegroundColor Green
+if ($script:warn -gt 0) { Write-Host "Warn:    $script:warn" -ForegroundColor Yellow }
 if ($script:skipped -gt 0) { Write-Host "Skipped: $script:skipped" -ForegroundColor Yellow }
 Write-Host "Fail:    $script:fail" -ForegroundColor $(if ($script:fail -eq 0) { "Green" } else { "Red" })
 Write-Host ""
@@ -120,4 +127,8 @@ if ($script:fail -gt 0) {
   Write-Host "Privacy verification FAILED. Address the issues above." -ForegroundColor Red
   exit 1
 }
-Write-Host "Privacy verification PASSED." -ForegroundColor Green
+if ($script:warn -gt 0) {
+  Write-Host "Privacy verification PASSED (with manual steps listed above)." -ForegroundColor Green
+} else {
+  Write-Host "Privacy verification PASSED." -ForegroundColor Green
+}

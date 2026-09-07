@@ -10,6 +10,16 @@ Thanks for considering a contribution. SBO is a template, not a framework — th
    ```bash
    bash scripts/verify-privacy.sh templates/private-vault-skeleton
    ```
+   It must exit 0 with zero failures. Machine-level items (Windows Search exclusion,
+   macOS Time Machine exclusion) report WARN with the manual step to take — they
+   never fail the run, because no script can confirm them.
+
+   `SBO_VERIFY_MODE` picks the check set:
+
+   | Value | Behaviour |
+   |---|---|
+   | `strict` *(default)* | every check runs; machine-level ones warn. Use on a real install. |
+   | `template` | machine-level checks are skipped outright, leaving only vault-shape checks. What CI runs against `templates/private-vault-skeleton`. |
 
 ## What we welcome
 
@@ -40,7 +50,7 @@ pytest -v
 
 - [ ] `pytest -v` is green on your machine
 - [ ] If you touched ingestion, you added a test that fails on `main` and passes with your change
-- [ ] If you touched the private-vault skeleton, `bash scripts/verify-privacy.sh templates/private-vault-skeleton` is 6/6
+- [ ] If you touched the private-vault skeleton, `bash scripts/verify-privacy.sh templates/private-vault-skeleton` exits 0 with zero failures
 - [ ] Commits follow the existing `feat:` / `fix:` / `docs:` / `chore:` style
 - [ ] No new mandatory cloud or paid-tier dependencies in the OSS template
 

@@ -43,3 +43,13 @@ link-checker-report.txt
 # Starlight/ACOS temporary files
 .starlight/
 .gemini/
+
+# Maintainer-local harness state (not part of the public template)
+.asph-wip/
+.agent-harness.json
+.grok/
+GROK.md
+MEMORY.md
+
+# Belongs to claude-code-config; would otherwise ship into a public template.
+.claude/hooks/starlight-pet-hook.js

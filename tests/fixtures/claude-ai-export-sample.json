@@ -1,0 +1,42 @@
+[
+  {
+    "uuid": "33333333-3333-3333-3333-333333333333",
+    "name": "Array-shaped Claude export",
+    "created_at": "2026-06-01T09:00:00.000000+00:00",
+    "updated_at": "2026-06-01T09:20:00.000000+00:00",
+    "chat_messages": [
+      {
+        "uuid": "msg-c1",
+        "text": "Does Claude.ai ever export as a JSON array instead of JSONL?",
+        "sender": "human",
+        "created_at": "2026-06-01T09:00:00.000000+00:00"
+      },
+      {
+        "uuid": "msg-c2",
+        "text": "Yes — conversations.json ships as a single top-level array of conversation objects.",
+        "sender": "assistant",
+        "created_at": "2026-06-01T09:00:20.000000+00:00"
+      }
+    ]
+  },
+  {
+    "uuid": "44444444-4444-4444-4444-444444444444",
+    "name": "Second array conversation",
+    "created_at": "2026-06-02T09:00:00.000000+00:00",
+    "updated_at": "2026-06-02T09:10:00.000000+00:00",
+    "chat_messages": [
+      {
+        "uuid": "msg-d1",
+        "text": "What key identifies a Claude conversation?",
+        "sender": "human",
+        "created_at": "2026-06-02T09:00:00.000000+00:00"
+      },
+      {
+        "uuid": "msg-d2",
+        "text": "chat_messages. ChatGPT uses a mapping tree instead.",
+        "sender": "assistant",
+        "created_at": "2026-06-02T09:00:15.000000+00:00"
+      }
+    ]
+  }
+]

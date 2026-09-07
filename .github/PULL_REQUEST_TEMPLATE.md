@@ -9,7 +9,7 @@
 ## Test plan
 
 - [ ] `pytest -v` green
-- [ ] `bash scripts/verify-privacy.sh templates/private-vault-skeleton` is 6/6 (if you touched private-vault skeleton or `dual_write.py`)
+- [ ] `bash scripts/verify-privacy.sh templates/private-vault-skeleton` exits 0 with zero failures (if you touched private-vault skeleton or `dual_write.py`)
 - [ ] New behavior has a test that fails on `main` and passes here
 
 ## Privacy impact

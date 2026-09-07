@@ -17,7 +17,7 @@ This is the LLM-accessible vault of a Second Brain OS (SBO) installation. Read t
 | `patterns/` | pattern-detector agent only | You write here on pattern-detector's behalf. |
 | `_meta/` | Paid-agent only | Reserved for paid-tier psychometric/business-map outputs. |
 | `_moc/` | Mixed | You may refresh link lists; never alter human-written structure. |
-| `_archive/` | Read-only for you | Frank moves notes here manually. |
+| `_archive/` | Read-only for you | The vault owner moves notes here manually. |
 
 ## Sibling vault
 

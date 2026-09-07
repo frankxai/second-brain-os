@@ -20,7 +20,7 @@ See `CLAUDE.md` in this folder for the full contract.
 
 - Drop into `_capture.md` whenever something passes through your head.
 - Ingestion script writes Claude.ai + ChatGPT summaries into `_inbox/{platform}/`.
-- Sunday: run `/palace` → triage inbox → write atomic notes in `notes/` → run `/people-update` and `/patterns-detect`.
+- Weekly: triage `_inbox/` → write atomic notes in `notes/` → run `/people-update` and `/patterns-detect` → run `/sbo-verify`.
 
 ## Built on SIP
 

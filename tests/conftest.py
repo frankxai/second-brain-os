@@ -47,3 +47,15 @@ def tmp_vault_pair(tmp_path: Path) -> tuple[Path, Path]:
     (private / "chat-history" / "claude-ai").mkdir(parents=True)
     (private / "chat-history" / "chatgpt").mkdir(parents=True)
     return brain, private
+
+
+@pytest.fixture
+def chatgpt_sharded_dir() -> Path:
+    """Directory holding a 2-shard ChatGPT export (conversations-000/001.json)."""
+    return FIXTURES_DIR / "chatgpt-sharded"
+
+
+@pytest.fixture
+def claude_ai_json_export_path() -> Path:
+    """Path to an array-shaped Claude.ai export fixture (.json, not JSONL)."""
+    return FIXTURES_DIR / "claude-ai-export-sample.json"

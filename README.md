@@ -4,7 +4,7 @@
 
 # Second Brain OS
 
-> An Obsidian second brain that reflects on its own corpus, cites everything it claims, and refuses to trust its own synthesis until an adversarial pass verifies it. Two-vault hard privacy separation. Coding-agent-native — the compute is the session you already pay for.
+> An Obsidian second brain that reflects on its own corpus, cites everything it claims, and refuses to trust its own synthesis until an adversarial pass verifies it. Two vaults, and an append-only log of every crossing between them. Coding-agent-native — the compute is the session you already pay for.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Built on SIP](https://img.shields.io/badge/Built%20on-SIP%20v1.1.1-blue.svg)](https://github.com/frankxai/Starlight-Intelligence-System)
@@ -20,7 +20,7 @@
 A bootable template for a working AI-augmented, two-vault Obsidian system. It ingests your AI chat exports, distills them into atomic notes, and — new in v0.3.0 — runs a scheduled reflection pass that asks questions of your own corpus and refuses to write an answer down until it's cited and adversarially checked. Retrieval is table stakes. The thing every other tool in this space skips is trustworthy synthesis you didn't ask for.
 
 - **`brain/` vault** — MCP-wired. Your LLM (Claude Desktop, Claude Code, etc.) reads + writes here. Publishable.
-- **`private/` vault** — air-gapped. No MCP server points here. No LLM has access. Sensitive content lives here permanently.
+- **`private/` vault** — no MCP server points here, so nothing an LLM browses reaches it. The one exception is deliberate: `/distill-inbox` reads a raw conversation when you invoke it, through the pointer its stub names. Sensitive content lives here permanently.
 
 ## Why this beats the field
 
@@ -45,9 +45,9 @@ Built-in-public receipts, scale stats only:
 - Verified through a **16-tool Obsidian MCP round-trip** — every command in this repo (`/distill-inbox`, `/patterns-detect`, `/people-update`, `/sbo-verify`, `/reflect`) runs against the same wired vault. See [`docs/obsidian-mcp.md`](docs/obsidian-mcp.md).
 - **73 tests** passing, zero-setup (`pytest` works in a fresh clone with no `pip install -e .` — see What's new below).
 
-## 30 minutes to wire. Up to 24 hours to first insight.
+## 30 minutes to wire.
 
-The Claude.ai data export has a **24-hour delivery window**. You can wire the entire system in 30 minutes, but you can't ingest until the export email arrives. Plan accordingly.
+Request your Claude.ai export first — it usually arrives in minutes, longer on a large account, and the **download link expires 24 hours** after it lands. Wire the system while you wait.
 
 ## Quick start
 
@@ -184,7 +184,7 @@ sbo-ingest tests/fixtures/claude-ai-export-sample.jsonl \
 │   ├── _meta/             # paid-tier psychometrics, businesses, decisions-history
 │   ├── _moc/              # Maps of Content
 │   └── _agents/           # agent prompt contracts
-└── private/               # air-gapped, no MCP, no LLM
+└── private/               # no MCP points here; read only via /distill-inbox
     ├── chat-history/{claude-ai,chatgpt}/    # raw conversations, UUID-named
     ├── journal/
     ├── relationships/
@@ -213,9 +213,25 @@ sbo-ingest tests/fixtures/claude-ai-export-sample.jsonl \
 
 ## Privacy
 
-> MCP never has a path to `private/`. The boundary is filesystem, not config.
+> MCP is never pointed at `private/`. That is a path convention, not a
+> kernel-enforced boundary — there is no separate uid, container, or mount
+> namespace here, and a coding agent with shell access can read either tree.
+
+So be exact about what this defends against: MCP scope creep, a misconfigured plugin, a retrieval tool pointed at the wrong root, and publishing `brain/` by accident. It does **not** defend against the distilling agent itself, which you consciously grant one read per conversation. The audit log exists because the convention can fail.
 
 Coding agents that run `/distill-inbox` read `private/` once per conversation (with your explicit consent the moment you invoke the command), produce the summary, and never copy raw content into `brain/`. The audit log records every read. `/reflect` never reads `private/` at all — if a candidate reflection would need private content to verify, it's dropped and the reason is stated, not silently skipped.
+
+### Titles cross the boundary by default
+
+Filenames are hashed tokens, but the conversation title still lands as a stub's heading and as a row in `_inbox/{platform}/_INDEX.md` — one file listing every conversation you own. On a real 5,311-conversation export those titles named medical, legal, relationship and employer topics, in the vault an LLM reads. A title is often the most revealing line in a conversation.
+
+Titles are also what make an inbox navigable, so this is your call:
+
+```bash
+SBO_TITLE_POLICY=redacted sbo-ingest path/to/export.zip
+```
+
+Headings and index rows fall back to the conversation token. The real title stays in `private/`, where the distilling agent still reads it.
 
 Read `docs/privacy-model.md` before ingesting sensitive content. Run `scripts/verify-privacy.{ps1,sh}` weekly.
 

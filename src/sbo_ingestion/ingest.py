@@ -9,7 +9,8 @@ Three modes:
   for, produces better cross-referenced summaries, and stays inspectable.
 
 - ``api``: call the Anthropic API directly. Costs ~$0.005/conversation on Haiku.
-  Use when you don't have a coding-agent session handy or want batch automation.
+  Only ever selected by an explicit ``--mode api`` — a stray ``ANTHROPIC_API_KEY``
+  in the environment must never move a user onto a paid path.
 
 - ``dry-run``: write raw + stub summary with explicit "skipped, not coming back"
   copy. No API call, no agent expected. Use to smoke-test installation.
@@ -23,6 +24,7 @@ from pathlib import Path
 from typing import Literal
 
 import click
+from anthropic import AnthropicError
 
 from sbo_ingestion import audit
 from sbo_ingestion.dual_write import (
@@ -78,8 +80,18 @@ def _dry_run_summary(convo) -> Summary:  # type: ignore[no-untyped-def]
     )
 
 
+EXPORT_SUFFIXES = (".json", ".jsonl")
+_DETECT_HEAD_CHARS = 65536
+
+
 def _detect_format(path: Path) -> str:
-    """Detect export format from file extension and content shape."""
+    """Detect export format from file extension and provenance keys.
+
+    Both platforms ship ``.json`` arrays, so shape alone cannot discriminate.
+    Claude.ai conversations carry ``chat_messages``; ChatGPT conversations carry
+    a ``mapping`` tree. Testing shape first routed every array-shaped Claude
+    export into the ChatGPT handler, where it died on the missing key.
+    """
     suffix = path.suffix.lower()
     if suffix == ".jsonl":
         return "claude.ai"
@@ -88,38 +100,48 @@ def _detect_format(path: Path) -> str:
             return "chatgpt"
         raise ValueError(f"No ChatGPT conversation members found in ZIP export: {path}")
     if suffix == ".json":
-        try:
-            with path.open("r", encoding="utf-8") as f:
-                head = f.read(2048)
-            if head.lstrip().startswith("["):
-                return "chatgpt"
-            if "chat_messages" in head:
-                return "claude.ai"
-        except Exception:
-            pass
+        with path.open("r", encoding="utf-8") as f:
+            head = f.read(_DETECT_HEAD_CHARS)
+        if '"chat_messages"' in head:
+            return "claude.ai"
+        if '"mapping"' in head:
+            return "chatgpt"
     raise ValueError(
-        f"Unknown export format: {path}. Expected .jsonl (Claude.ai), "
-        f".json (ChatGPT conversations.json), or an official ChatGPT export .zip."
+        f"Unknown export format: {path}. Expected .jsonl (Claude.ai), .json "
+        f"containing 'chat_messages' (Claude.ai) or 'mapping' (ChatGPT), "
+        f"or an official ChatGPT export .zip."
     )
 
 
-def _resolve_mode(
-    mode: Mode | None,
-    *,
-    dry_run: bool,
-    api_key: str,
-) -> Mode:
-    """Resolve the effective mode from explicit --mode + legacy flags.
+def _resolve_export_paths(export_path: Path) -> list[Path]:
+    """Expand a file, a directory, or a glob into a sorted list of export files.
 
-    Precedence: explicit ``mode`` wins. Otherwise ``--dry-run`` implies dry-run,
-    ``--api-key`` (without dry-run) implies api, fallback is DEFAULT_MODE (agent).
+    Modern ChatGPT exports ship sharded as ``conversations-000.json`` …
+    ``conversations-053.json``; zero-padded names sort into shard order.
+    """
+    if export_path.is_file():
+        return [export_path]
+    if export_path.is_dir():
+        candidates = list(export_path.iterdir())
+    else:
+        candidates = list(export_path.parent.glob(export_path.name))
+    paths = sorted(p for p in candidates if p.is_file() and p.suffix in EXPORT_SUFFIXES)
+    if not paths:
+        raise ValueError(f"No .json or .jsonl export files found at {export_path}")
+    return paths
+
+
+def _resolve_mode(mode: Mode | None, *, dry_run: bool) -> Mode:
+    """Resolve the effective mode from explicit --mode + the legacy --dry-run flag.
+
+    Precedence: explicit ``mode`` wins, then ``--dry-run``, then DEFAULT_MODE.
+    A present API key is deliberately not part of this: ``api`` is a paid path and
+    only an explicit ``--mode api`` may select it.
     """
     if mode is not None:
         return mode
     if dry_run:
         return "dry-run"
-    if api_key:
-        return "api"
     return DEFAULT_MODE
 
 
@@ -143,12 +165,14 @@ def ingest(
     dry_run: bool = False,
     memories_path: Path | None = None,
 ) -> list[DualWriteResult]:
-    """Ingest one export file. Returns list of dual-write results.
+    """Ingest an export file, a directory of shards, or a glob.
+
+    Sharded exports are processed in sorted order as a single run; results and
+    audit entries accumulate across shards.
 
     Mode resolution:
       - explicit ``mode`` wins
       - else ``dry_run=True`` -> "dry-run"
-      - else ``api_key`` non-empty -> "api"
       - else default "agent"
 
     Also emits a newest-first ``_INDEX.md`` corpus map per platform, and — if a
@@ -159,11 +183,36 @@ def ingest(
     conversation processed. The audit log lives inside the private vault and
     is never read by MCP.
     """
-    effective_mode = _resolve_mode(mode, dry_run=dry_run, api_key=api_key)
+    effective_mode = _resolve_mode(mode, dry_run=dry_run)
 
     if effective_mode == "api" and not api_key:
         raise ValueError("api_key is required when mode='api'.")
 
+    results: list[DualWriteResult] = []
+    for path in _resolve_export_paths(export_path):
+        results.extend(
+            _ingest_file(
+                path,
+                brain_root=brain_root,
+                private_root=private_root,
+                api_key=api_key,
+                effective_mode=effective_mode,
+                memories_path=memories_path,
+            )
+        )
+    return results
+
+
+def _ingest_file(
+    export_path: Path,
+    *,
+    brain_root: Path,
+    private_root: Path,
+    api_key: str,
+    effective_mode: Mode,
+    memories_path: Path | None = None,
+) -> list[DualWriteResult]:
+    """Ingest a single export file with an already-resolved mode."""
     fmt = _detect_format(export_path)
     if fmt == "claude.ai":
         convos = claude_ai_handler.parse_export(export_path)
@@ -212,9 +261,10 @@ def ingest(
             fmt=fmt,
             raw_path=result.private_path,
             brain_path=result.brain_path,
+            source=export_path.name,
+            brain_preserved=result.brain_preserved,
             private_root_for_rel=private_root,
             brain_root_for_rel=brain_root,
-            brain_preserved=result.brain_preserved,
         )
         results.append(result)
         # Keep only index metadata. Message bodies may be gigabytes across a full
@@ -266,7 +316,7 @@ def _mark_needs_summary(brain_path: Path, *, brain_root: Path) -> None:
 
 
 @click.command()
-@click.argument("export_path", type=click.Path(exists=True, path_type=Path))
+@click.argument("export_paths", nargs=-1, type=click.Path(path_type=Path))
 @click.option(
     "--brain-root",
     type=click.Path(path_type=Path),
@@ -290,7 +340,8 @@ def _mark_needs_summary(brain_path: Path, *, brain_root: Path) -> None:
         "Ingestion mode. Default: 'agent' (recommended). "
         "'agent' writes raw + stub; you fill the stub via /distill-inbox in any "
         "coding-agent session — no extra API cost. "
-        "'api' calls Anthropic directly (~$0.005/convo on Haiku). "
+        "'api' calls Anthropic directly (~$0.005/convo on Haiku); it is never "
+        "selected implicitly, pass it explicitly. "
         "'dry-run' writes stubs with no follow-up expected; for smoke-testing."
     ),
 )
@@ -298,8 +349,8 @@ def _mark_needs_summary(brain_path: Path, *, brain_root: Path) -> None:
     "--api-key",
     envvar="ANTHROPIC_API_KEY",
     default="",
-    help="Anthropic API key. Default: $ANTHROPIC_API_KEY env var. "
-    "If set without --mode, implies --mode api.",
+    help="Anthropic API key, used only by --mode api. "
+    "Default: $ANTHROPIC_API_KEY env var. Setting it does not enable api mode.",
 )
 @click.option(
     "--dry-run",
@@ -316,7 +367,7 @@ def _mark_needs_summary(brain_path: Path, *, brain_root: Path) -> None:
     "If omitted, a memories.json sibling next to EXPORT_PATH is auto-detected.",
 )
 def cli(
-    export_path: Path,
+    export_paths: tuple[Path, ...],
     brain_root: Path,
     private_root: Path,
     mode_flag: str | None,
@@ -324,7 +375,15 @@ def cli(
     dry_run: bool,
     memories_path: Path | None,
 ) -> None:
-    """Ingest an AI chat export into your SBO vaults."""
+    """Ingest AI chat exports into your SBO vaults.
+
+    EXPORT_PATHS are files, directories, or globs. Sharded exports
+    (conversations-000.json ... conversations-053.json) are processed in
+    sorted order as one run.
+    """
+    if not export_paths:
+        click.echo("[error] no export path given", err=True)
+        sys.exit(1)
     if not brain_root.exists():
         click.echo(f"[error] brain vault not found at {brain_root}", err=True)
         sys.exit(1)
@@ -335,7 +394,6 @@ def cli(
     effective_mode = _resolve_mode(
         mode_flag,  # type: ignore[arg-type]
         dry_run=dry_run,
-        api_key=api_key,
     )
 
     if effective_mode == "api" and not api_key:
@@ -345,7 +403,13 @@ def cli(
         )
         sys.exit(1)
 
-    click.echo(f"[sbo] ingesting {export_path}")
+    try:
+        files = [f for p in export_paths for f in _resolve_export_paths(p)]
+    except ValueError as e:
+        click.echo(f"[error] {e}", err=True)
+        sys.exit(1)
+
+    click.echo(f"[sbo] ingesting {len(files)} file(s)")
     click.echo(f"[sbo] brain:   {brain_root}")
     click.echo(f"[sbo] private: {private_root}")
     click.echo(f"[sbo] mode:    {effective_mode}")
@@ -354,14 +418,22 @@ def cli(
     elif effective_mode == "dry-run":
         click.echo("[sbo] DRY-RUN: no API call; stub summaries; no follow-up expected.")
 
-    results = ingest(
-        export_path,
-        brain_root=brain_root,
-        private_root=private_root,
-        api_key=api_key,
-        mode=effective_mode,
-        memories_path=memories_path,
-    )
+    results: list[DualWriteResult] = []
+    try:
+        for path in files:
+            results.extend(
+                ingest(
+                    path,
+                    brain_root=brain_root,
+                    private_root=private_root,
+                    api_key=api_key,
+                    mode=effective_mode,
+                    memories_path=memories_path,
+                )
+            )
+    except AnthropicError as e:
+        click.echo(f"[error] Anthropic API call failed: {e}", err=True)
+        sys.exit(1)
     click.echo(f"[sbo] wrote {len(results)} conversation pairs")
     for r in results:
         click.echo(f"  raw:     {r.private_path}")
