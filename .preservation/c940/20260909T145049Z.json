@@ -1,0 +1,21 @@
+{
+  "schema": "c940-wip-preservation/v1",
+  "repository": "second-brain-os",
+  "created_utc": "2026-09-09T19:33:11.798077+00:00",
+  "source_head": "1c58c81f8653b7f5fc69e1678deabb74808c7a68",
+  "safe_remote_ancestor": "1c58c81f8653b7f5fc69e1678deabb74808c7a68",
+  "status": "WIP-not-approved-for-integration",
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "bytes": 924,
+      "sha256": "807897cc07d3d3d067dd44ea1fa7114fa55b3bc95570e59ed8b62ef60804ac8f"
+    }
+  ],
+  "restrictions": [
+    "No automatic merge/deploy/runtime activation",
+    "Known defects recorded in private tracker v2 handoff",
+    "Private local ancestry deliberately excluded",
+    "Other pending paths and private data remain separate recovery work"
+  ]
+}
