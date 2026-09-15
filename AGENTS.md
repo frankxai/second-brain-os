@@ -1,5 +1,13 @@
-# Second brain OS — agents
+---
+name: second-brain-os
+updated: 2026-07-16
+tags: [agent-contracts, cron, execution, multi-agent]
+source: Activation Sprint + Multi-Agent Alignment
+---
 
+# Second Brain OS — Agents & Intelligence Architecture
+
+> Persistent personal intelligence and cognitive memory operating system. Built on the Starlight Intelligence Protocol (SIP) Layer 1.
 > This file has two audiences: (1) coding agents contributing to this repo, and (2) the product's own agents that run inside an SBO vault. Read the section relevant to your task.
 
 ## Working in this repo (for coding agents)
@@ -44,6 +52,47 @@ Installed via `@frankx/second-brain-pro` npm package on purchase. Not in this OS
 7. **ikigai-extractor** — values + ikigai analysis. Quarterly. Writes `_meta/values.md`.
 8. **content-engine-integration** — feeds the FrankX content pipeline. Weekly.
 
+## Operational Execution Layer & Rituals
+
+### The 4-Step Alina Pak Ingestion Cycle
+All raw notes and incoming signals follow:
+1. **Drop**: Unfiltered raw capture into `_inbox/` with zero cognitive friction.
+2. **Extract**: Semantic atomic distillation into notes with explicit tags and references.
+3. **Direct**: Connect to projects, people, businesses, or decision trees.
+4. **Automate**: Feed downstream multi-agent actions (pattern-detector, content engine, vault-miner).
+
+### Ritual Cadence
+- **Daily**: Git health sync, triage `_inbox/` into wiki-style atomic markdown.
+- **Weekly**: Run `pattern-detector` and `content-engine-integration`.
+- **Monthly**: Run `vault-miner.py` and publish summary report to `_meta/decisions-history.md`.
+- **Quarterly**: Run psychometrics baseline updates (`big-5`, `16p`, `stp`, `ikigai`).
+
+## Multi-Agent Ecosystem Alignment
+
+- **SIS (Layer 0 Substrate)**: Consumes and syncs memory across the 6 core vaults (`Strategic ◆`, `Technical ⬡`, `Creative ✦`, `Operational ▸`, `Wisdom ◎`, `Horizon ↗`).
+- **ruflow / claude-flow v3**: Swarm routing and RuVector embedding memory bus streaming.
+- **oh-my-openagent (OmO)**: Parallel role delegation and multi-harness dispatch.
+- **Hermes Agent**: Autonomous cron-scheduled maintenance and deep multi-source synthesis with provenance.
+- **OpenClaw**: Sovereign security boundary and cryptographic attestation.
+
 ## Built on SIP
 
-All agents emit SIP attestation blocks on artifact creation. Validity disclosures are non-removable.
+All agents emit SIP attestation blocks on artifact creation:
+```markdown
+**SIP Attestation**
+protocol: SIP v1.1.1
+analyzed_at: YYYY-MM-DD
+sources: Second Brain vault artifacts
+```
+
+## Design Taste Kernel
+
+For any site, app, landing page, dashboard, visual identity, brand, motion, media, social, or frontend task, apply the shared Design Taste Kernel before handoff:
+
+- `C:\Users\frank\starlight\repos\DESIGN_TASTE.md`
+- `C:\Users\frank\starlight\repos\WEB_EXPERIENCE_STANDARD.md`
+- `C:\Users\frank\starlight\repos\MOTION_TASTE_RUBRIC.md`
+- `C:\Users\frank\starlight\repos\MULTI_AGENT_DESIGN_COUNCIL.md`
+- `C:\Users\frank\starlight\repos\VISUAL_QA_GATE.md`
+
+When motion, scroll, generated media, GIF/video, or premium polish matters, route through the Motion Design Studio plugin/skills and verify the result visually.
