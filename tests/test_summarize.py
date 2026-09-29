@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from sbo_ingestion.handlers.claude_ai import Conversation, Message
-from sbo_ingestion.summarize import Summary, summarize
+from sbo_ingestion.summarize import Summary, _parse_summary_or_fallback, summarize
 
 
 def _convo() -> Conversation:
@@ -62,3 +64,42 @@ def test_summarize_handles_malformed_response(mock_anthropic_cls: MagicMock) -> 
     assert isinstance(result, Summary)
     assert result.title == "Test conversation"  # falls back to the convo title
     assert "could not be parsed" in result.tldr.lower() or result.tldr == ""
+
+
+@pytest.mark.parametrize("text", ["[]", '"just a string"', "null", "42"])
+def test_parse_valid_json_that_is_not_an_object_falls_back(text: str) -> None:
+    result = _parse_summary_or_fallback(text, fallback_title="Fallback")
+    assert result.title == "Fallback"
+    assert "could not be parsed" in result.tldr.lower()
+
+
+def test_parse_string_list_field_is_one_item_not_characters() -> None:
+    result = _parse_summary_or_fallback(
+        '{"title": "T", "tldr": "x", "insights": "One complete insight."}',
+        fallback_title="Fallback",
+    )
+    assert result.insights == ("One complete insight.",)
+
+
+def test_parse_ignores_wrong_typed_fields() -> None:
+    result = _parse_summary_or_fallback(
+        '{"title": 7, "tldr": ["a"], "insights": [{"a": 1}, "kept", 3, null],'
+        ' "decisions": null, "open_questions": 5, "people_mentioned": null,'
+        ' "suggested_destinations": 5}',
+        fallback_title="Fallback",
+    )
+    assert result.title == "Fallback"
+    assert result.tldr == ""
+    assert result.insights == ("kept",)
+    assert result.decisions == ()
+    assert result.open_questions == ()
+    assert result.people_mentioned == ()
+    assert result.suggested_destinations == ()
+
+
+def test_parse_people_need_a_string_name() -> None:
+    result = _parse_summary_or_fallback(
+        '{"people_mentioned": [{"name": "Ada", "context": "mentor"}, {"name": 5}, {"name": "Bo", "context": null}, "Cy"]}',
+        fallback_title="Fallback",
+    )
+    assert [(p.name, p.context) for p in result.people_mentioned] == [("Ada", "mentor"), ("Bo", "")]
