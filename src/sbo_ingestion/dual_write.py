@@ -11,7 +11,6 @@ path (the MCP server cannot resolve it; the link is for human reference in Obsid
 from __future__ import annotations
 
 import os
-import os
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -215,6 +214,11 @@ def _single_line(value: str) -> str:
     return " ".join((value or "").split()) or "(untitled)"
 
 
+def _flat(value: str) -> str:
+    """Collapse a summary list item to one line so it cannot start a heading or bullet."""
+    return " ".join(str(value).split())
+
+
 def _titles_are_redacted() -> bool:
     """Whether the conversation title is kept out of the LLM-readable vault.
 
@@ -309,23 +313,23 @@ def _render_brain_body(summary: Summary) -> str:
     ]
     if summary.insights:
         lines.append("## Insights")
-        lines.extend(f"- {x}" for x in summary.insights)
+        lines.extend(f"- {_flat(x)}" for x in summary.insights)
         lines.append("")
     if summary.decisions:
         lines.append("## Decisions made")
-        lines.extend(f"- {x}" for x in summary.decisions)
+        lines.extend(f"- {_flat(x)}" for x in summary.decisions)
         lines.append("")
     if summary.open_questions:
         lines.append("## Open questions")
-        lines.extend(f"- {x}" for x in summary.open_questions)
+        lines.extend(f"- {_flat(x)}" for x in summary.open_questions)
         lines.append("")
     if summary.people_mentioned:
         lines.append("## People mentioned")
         for p in summary.people_mentioned:
-            lines.append(f"- **{p.name}** — {p.context}")
+            lines.append(f"- **{_flat(p.name)}** — {_flat(p.context)}")
         lines.append("")
     if summary.suggested_destinations:
         lines.append("## Suggested destinations")
-        lines.extend(f"- `{x}`" for x in summary.suggested_destinations)
+        lines.extend(f"- `{_flat(x)}`" for x in summary.suggested_destinations)
         lines.append("")
     return "\n".join(lines).rstrip() + UNTRUSTED_FOOTER
