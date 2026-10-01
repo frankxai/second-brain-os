@@ -90,7 +90,28 @@ def summarize(
     return _parse_summary_or_fallback(text, fallback_title=convo.title)
 
 
+def _strings(value: object) -> tuple[str, ...]:
+    """Coerce an LLM-supplied list field to a tuple of non-empty strings.
+
+    A bare string is one item (tuple("abc") would split it into characters);
+    anything that is not a string is dropped.
+    """
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return ()
+    return tuple(item for item in value if isinstance(item, str) and item.strip())
+
+
+def _text(value: object, default: str) -> str:
+    return value if isinstance(value, str) and value else default
+
+
 def _parse_summary_or_fallback(text: str, *, fallback_title: str) -> Summary:
+    unparsed = Summary(
+        title=fallback_title,
+        tldr="(Could not be parsed from LLM response.)",
+    )
     try:
         obj = json.loads(text)
     except json.JSONDecodeError:
@@ -98,28 +119,26 @@ def _parse_summary_or_fallback(text: str, *, fallback_title: str) -> Summary:
         start = text.find("{")
         end = text.rfind("}")
         if start == -1 or end == -1 or end < start:
-            return Summary(
-                title=fallback_title,
-                tldr="(Could not be parsed from LLM response.)",
-            )
+            return unparsed
         try:
             obj = json.loads(text[start : end + 1])
         except json.JSONDecodeError:
-            return Summary(
-                title=fallback_title,
-                tldr="(Could not be parsed from LLM response.)",
-            )
+            return unparsed
+    if not isinstance(obj, dict):
+        return unparsed
+
+    people_raw = obj.get("people_mentioned")
     people = tuple(
-        PersonMention(name=p.get("name", ""), context=p.get("context", ""))
-        for p in obj.get("people_mentioned", [])
-        if isinstance(p, dict) and p.get("name")
+        PersonMention(name=p["name"], context=_text(p.get("context"), ""))
+        for p in (people_raw if isinstance(people_raw, list) else [])
+        if isinstance(p, dict) and isinstance(p.get("name"), str) and p["name"]
     )
     return Summary(
-        title=obj.get("title") or fallback_title,
-        tldr=obj.get("tldr") or "",
-        insights=tuple(obj.get("insights") or []),
-        decisions=tuple(obj.get("decisions") or []),
-        open_questions=tuple(obj.get("open_questions") or []),
+        title=_text(obj.get("title"), fallback_title),
+        tldr=_text(obj.get("tldr"), ""),
+        insights=_strings(obj.get("insights")),
+        decisions=_strings(obj.get("decisions")),
+        open_questions=_strings(obj.get("open_questions")),
         people_mentioned=people,
-        suggested_destinations=tuple(obj.get("suggested_destinations") or []),
+        suggested_destinations=_strings(obj.get("suggested_destinations")),
     )
