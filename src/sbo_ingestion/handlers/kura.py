@@ -6,6 +6,7 @@ fail closed; captures cover the visible thread, not the provider's entire accoun
 from __future__ import annotations
 
 import re
+import json
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -53,7 +54,8 @@ def parse_export(path: Path):
         raise ValueError("Unsupported Kura platform")
     label, normalized_platform, hosts, pattern = PLATFORMS[platform]
     source = urlparse(str(post.get("source", "")))
-    if source.scheme != "https" or source.hostname not in hosts or source.username or source.password:
+    if (source.scheme != "https" or source.hostname not in hosts or source.username or source.password
+            or source.port not in (None, 443)):
         raise ValueError("Kura source URL does not match its platform")
     source_id = str(post.get("id", ""))
     if not source_id or len(source_id) > 512:
@@ -70,6 +72,61 @@ def parse_export(path: Path):
     except ValueError as error:
         raise ValueError("Kura capturedAt must be an ISO timestamp") from error
     roles = {"You": "human", label: "assistant", "System": "system"}
+    packet_path = path.with_name("capture.json")
+    if packet_path.exists():
+        if (packet_path.is_symlink() or not packet_path.resolve().is_relative_to(path.parent.resolve())
+                or packet_path.stat().st_size > MAX_CAPTURE_BYTES):
+            raise ValueError("Kura packet must remain in its capture folder and fit the size bound")
+        packet = json.loads(packet_path.read_text(encoding="utf-8-sig"))
+        expected = {key: str(post.get(key, "")) for key in ("id", "platform", "title", "source", "capturedAt")}
+        actual = packet.get("capture") if isinstance(packet, dict) else None
+        if not isinstance(actual, dict) or set(actual) != set(expected):
+            raise ValueError("Invalid capture identity in Kura packet")
+        try:
+            packet_time = datetime.fromisoformat(str(actual["capturedAt"]).replace("Z", "+00:00"))
+        except ValueError as error:
+            raise ValueError("Invalid capture timestamp in Kura packet") from error
+        same_identity = all(actual[key] == expected[key] for key in expected if key != "capturedAt")
+        if (not isinstance(packet, dict) or packet.get("kind") != "kura-capture"
+                or packet.get("packetVersion") != "1.0.0" or not same_identity
+                or packet_time != datetime.fromisoformat(captured.replace("Z", "+00:00"))
+                or packet.get("renderedBody") != post.content.strip()):
+            raise ValueError("Kura packet and Markdown disagree; finish or repeat the browser capture")
+        messages = packet.get("messages")
+        spans = packet.get("messageSpans")
+        if (type(post.get("messageCount")) is not int or not isinstance(messages, list)
+                or not messages or len(messages) != post.get("messageCount")
+                or not isinstance(spans, list) or len(spans) != len(messages)):
+            raise ValueError("Kura packet message count disagrees with Markdown")
+        normalized = []
+        # Browser string offsets count UTF-16 units; Python counts code points.
+        encoded_body = post.content.strip().encode("utf-16-le")
+        previous_end = 0
+        for index, message in enumerate(messages):
+            if (not isinstance(message, dict) or message.get("role") not in ("user", "assistant", "system")
+                    or not isinstance(message.get("content"), str)
+                    or not isinstance(message.get("timestamp", ""), str)):
+                raise ValueError("Invalid message in Kura packet")
+            span = spans[index]
+            if (not isinstance(span, dict) or type(span.get("start")) is not int
+                    or type(span.get("length")) is not int or span["length"] < 0):
+                raise ValueError("Invalid message span in Kura packet")
+            role_label = "You" if message["role"] == "user" else label if message["role"] == "assistant" else "System"
+            stamp = f" <sub>· {message['timestamp']}</sub>" if message.get("timestamp") and packet.get("includeTimestamps", True) else ""
+            prefix = f"## {role_label}{stamp}\n\n".encode("utf-16-le")
+            start, end = span["start"] * 2, (span["start"] + span["length"]) * 2
+            expected_text = message["content"].strip().replace("\r\n", "\n").encode("utf-16-le")
+            if (start - len(prefix) < previous_end or end > len(encoded_body)
+                    or encoded_body[start-len(prefix):start] != prefix
+                    or encoded_body[start:end] != expected_text):
+                raise ValueError("Kura message data and rendered Markdown disagree")
+            previous_end = end
+            normalized.append(Message(f"{source_id}:{index}",
+                                      "human" if message["role"] == "user" else message["role"],
+                                      message["content"], message.get("timestamp", "")))
+        yield Conversation(uuid=source_id, title=expected["title"], created_at="", updated_at=captured,
+                           messages=tuple(normalized), platform=normalized_platform, source_url=source.geturl())
+        return
     heading = re.compile(r"^## (You|" + re.escape(label) + r"|System)(?: <sub>· (.*?)</sub>)?$")
     messages = []
     current = None

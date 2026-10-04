@@ -1,12 +1,12 @@
 ---
 id: chatgpt-fixture-e2e
-slug: 2026-10-04_capture-pipeline-fixture
-title: "Capture pipeline fixture"
+slug: "2026-10-04_capture-pipeline-fixture"
+title: "Capture pipeline fixture 🧠"
 platform: chatgpt
 source: https://chatgpt.com/c/fixture-e2e
-capturedAt: 2026-10-04T10:00:00Z
+capturedAt: "2026-10-04T10:00:00Z"
 capturedBy: kura/0.2.0
-schemaVersion: 0.2.0
+schemaVersion: "0.2.0"
 messageCount: 2
 hasMedia: false
 hasCode: false
@@ -20,7 +20,7 @@ worldbuilding: false
 tags: []
 ---
 
-# Capture pipeline fixture
+# Capture pipeline fixture 🧠
 
 > **Platform:** chatgpt · **Source:** [https://chatgpt.com/c/fixture-e2e](https://chatgpt.com/c/fixture-e2e) · **Captured:** 2026-10-04T10:00:00Z
 ## You

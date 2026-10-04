@@ -15,8 +15,16 @@ stubs in `brain/_inbox/`. A stub is pending work, not a distilled memory.
 
 Select the `Kura/` capture root, not your home directory. Discovery examines only
 `<platform>/<folder>/conversation.md`, with a maximum of 10,000 captures per pass
-and 64 MiB per file. Unknown schemas, source-host mismatches, ambiguous message
-counts and unclosed fences stop that input. No link or media URL is fetched.
+and 64 MiB per file. Unknown schemas, source-host mismatches and invalid message
+counts stop that input. No link or media URL is fetched.
+
+New captures include a `capture.json` packet v1.0.0. Identity, rendered body and
+UTF-16 message spans must agree with the Markdown. This preserves embedded role
+headings and incomplete code fences as source data. If the files disagree, finish
+or repeat the browser capture. A human body edit also requires reconciling the
+companion. Curated frontmatter remains editable. Older Markdown-only captures
+keep the conservative parser; recapture ambiguous historical captures rather than
+guessing their message roles.
 
 ```powershell
 ./scripts/process-captures.ps1 -CaptureRoot 'D:/private-captures/Kura' `

@@ -66,11 +66,19 @@ def write_pair(
 
     # Private (raw)
     private_dir = private_root / "chat-history" / platform_dir
+    _assert_descendant(private_dir, private_root)
     private_dir.mkdir(parents=True, exist_ok=True)
     private_filename = f"{date}-{source_id_token}.md"
     private_path = private_dir / private_filename
+    brain_dir = brain_root / "_inbox" / platform_dir
+    canonical_brain_path = brain_dir / f"{date}-{conversation_token}.md"
+    brain_path = (existing_brain_paths or {}).get(convo.uuid, canonical_brain_path)
+    _assert_descendant(brain_path, brain_root)
+    if brain_path.exists() and frontmatter.load(brain_path).get("conversation_id") != convo.uuid:
+        raise FileExistsError(f"Brain path collision for conversation {convo.uuid}: {brain_path}")
     previous_brain = (existing_brain_paths or {}).get(convo.uuid)
     if previous_brain and previous_brain.exists():
+        _assert_descendant(previous_brain, brain_root)
         previous = frontmatter.load(previous_brain)
         reference = str(previous.get("private_file", ""))
         parts = Path(reference).parts
@@ -83,6 +91,9 @@ def write_pair(
                 raise FileExistsError("Existing private reference belongs to another conversation")
             private_path = candidate
             private_filename = candidate.name
+    _assert_descendant(private_path, private_root)
+    if private_path.exists() and frontmatter.load(private_path).get("conversation_id") != convo.uuid:
+        raise FileExistsError("Private path belongs to another conversation")
     if convo.source_url and private_path.exists():
         previous_raw = frontmatter.load(private_path)
         if previous_raw.get("capture_scope") != "visible-browser-thread":
@@ -90,6 +101,9 @@ def write_pair(
             private_path = private_dir / "kura-views" / f"{source_id_token}.md"
             private_path.parent.mkdir(parents=True, exist_ok=True)
             private_filename = str(private_path.relative_to(private_dir)).replace("\\", "/")
+    _assert_descendant(private_path, private_root)
+    if private_path.exists() and frontmatter.load(private_path).get("conversation_id") != convo.uuid:
+        raise FileExistsError("Private view path belongs to another conversation")
     private_post = frontmatter.Post(
         content=UNTRUSTED_BANNER + convo.to_raw_markdown() + UNTRUSTED_FOOTER,
         source=convo.platform,

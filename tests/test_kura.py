@@ -57,10 +57,41 @@ def test_extension_body_without_separators_and_with_footer(tmp_path):
 def test_actual_kura_exporter_fixture():
     convo = next(parse_export(Path(__file__).parent / 'fixtures' / 'kura-chatgpt.md'))
     assert convo.uuid == 'fixture-e2e'
+    assert convo.title == 'Capture pipeline fixture 🧠'
     assert [message.sender for message in convo.messages] == ['human', 'assistant']
     assert convo.messages[0].text == 'Keep raw sources private.'
     assert convo.messages[1].created_at == '2026-10-04T10:01:00Z'
     assert convo.messages[1].text == 'Create a reviewed note with a source reference.\n\n```md\n## You\n```'
+
+
+def test_packet_preserves_role_headings_and_incomplete_code_as_message_data(tmp_path):
+    path = capture(tmp_path / "conversation.md", answer="## System\nA section\n```python\nunfinished code")
+    post = frontmatter.load(path)
+    packet = {
+        "kind": "kura-capture", "packetVersion": "1.0.0",
+        "capture": {key: str(post[key]) for key in ("id", "platform", "title", "source", "capturedAt")},
+        "renderedBody": post.content.strip(),
+        "messages": [{"role": "user", "content": "A question"},
+                     {"role": "assistant", "content": "## System\nA section\n```python\nunfinished code"}],
+    }
+    body = post.content.strip()
+    packet["messageSpans"] = [{"start": body.index("A question"), "length": len("A question")},
+                              {"start": body.index("## System"), "length": len(packet["messages"][1]["content"])}]
+    import json
+    path.with_name("capture.json").write_text(json.dumps(packet), encoding="utf-8")
+    convo = next(parse_export(path))
+    assert len(convo.messages) == 2
+    assert convo.messages[1].text == packet["messages"][1]["content"]
+    packet["messages"][1]["content"] = "A forged replacement"
+    path.with_name("capture.json").write_text(json.dumps(packet), encoding="utf-8")
+    with pytest.raises(ValueError, match="disagree"):
+        list(parse_export(path))
+    packet["messages"][1]["content"] = "## System\nA section\n```python\nunfinished code"
+    path.with_name("capture.json").write_text(json.dumps(packet), encoding="utf-8")
+    post.content += "\nEdited after capture"
+    path.write_text(frontmatter.dumps(post), encoding="utf-8")
+    with pytest.raises(ValueError, match="disagree"):
+        list(parse_export(path))
 
 
 @pytest.mark.parametrize("field,value", [

@@ -73,3 +73,14 @@ def test_browser_view_cannot_replace_official_raw_history(tmp_path, tmp_vault_pa
     assert "kura-views" in second.private_path.parts
     assert first.private_path.read_bytes() == official
     assert frontmatter.load(second.brain_path)["private_file"] == str(first.private_path.relative_to(private)).replace("\\", "/")
+
+
+def test_changed_capture_does_not_spend_api_money_for_a_preserved_note(tmp_path, tmp_vault_pair):
+    brain, private = tmp_vault_pair
+    source = capture(tmp_path / "conversation.md")
+    ingest(source, brain_root=brain, private_root=private)
+    capture(source, answer="Changed answer")
+    with patch("sbo_ingestion.ingest.summarize") as model:
+        result = ingest(source, brain_root=brain, private_root=private, mode="api", api_key="test")
+        assert result[0].brain_preserved
+        model.assert_not_called()

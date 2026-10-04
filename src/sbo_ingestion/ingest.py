@@ -254,7 +254,7 @@ def _ingest_file(
     )
     for convo in convos:
         platform = convo.platform
-        if effective_mode == "api":
+        if effective_mode == "api" and convo.uuid not in existing_brain_paths:
             summary = summarize(convo, api_key=api_key)
         elif effective_mode == "dry-run":
             summary = _dry_run_summary(convo)
@@ -326,7 +326,15 @@ def _ingest_kura_capture(export_path: Path, *, brain_root: Path, private_root: P
                          ensure_ascii=False, sort_keys=True)
     digest = sha256(payload.encode()).hexdigest()
     with audit.exclusive_lock(state_path.with_suffix(".lock")):
-        state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
+        except json.JSONDecodeError as error:
+            raise ValueError("Invalid private Kura receipt; restore it from a private backup before retrying") from error
+        if (not isinstance(state, dict) or (state and (
+                not isinstance(state.get("raw_path"), str)
+                or not isinstance(state.get("content_sha256"), str)
+                or type(state.get("refresh_pending")) is not bool))):
+            raise ValueError("Invalid private Kura receipt fields; restore the receipt before retrying")
         indexes = brain_indexes if brain_indexes is not None else {}
         if convo.platform not in indexes:
             indexes[convo.platform] = index_existing_brain_paths(brain_root=brain_root, platform=convo.platform)
@@ -343,7 +351,7 @@ def _ingest_kura_capture(export_path: Path, *, brain_root: Path, private_root: P
             history = private_root / "_distill" / "kura" / "history" / token[:16] / f"{raw_digest[:32]}.md"
             history.parent.mkdir(parents=True, exist_ok=True)
             _atomic_write_text(history, raw.read_text(encoding="utf-8"), root=private_root)
-        summary = (summarize(convo, api_key=api_key) if effective_mode == "api" else
+        summary = (summarize(convo, api_key=api_key) if effective_mode == "api" and convo.uuid not in existing else
                    _dry_run_summary(convo) if effective_mode == "dry-run" else _agent_stub_summary(convo))
         result = write_pair(convo, summary, brain_root=brain_root, private_root=private_root,
                             existing_brain_paths=existing)
@@ -360,7 +368,7 @@ def _ingest_kura_capture(export_path: Path, *, brain_root: Path, private_root: P
                                     brain_preserved=int(result.brain_preserved))
         _atomic_write_text(state_path, json.dumps({"content_sha256": digest,
                            "raw_sha256": sha256(result.private_path.read_bytes()).hexdigest(),
-                           "raw_path": str(result.private_path.relative_to(private_root)),
+                           "raw_path": result.private_path.relative_to(private_root).as_posix(),
                            "refresh_pending": result.brain_preserved}, indent=2), root=private_root)
         return [result]
 
