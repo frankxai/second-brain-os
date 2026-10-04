@@ -11,7 +11,6 @@ path (the MCP server cannot resolve it; the link is for human reference in Obsid
 from __future__ import annotations
 
 import os
-import os
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -70,6 +69,27 @@ def write_pair(
     private_dir.mkdir(parents=True, exist_ok=True)
     private_filename = f"{date}-{source_id_token}.md"
     private_path = private_dir / private_filename
+    previous_brain = (existing_brain_paths or {}).get(convo.uuid)
+    if previous_brain and previous_brain.exists():
+        previous = frontmatter.load(previous_brain)
+        reference = str(previous.get("private_file", ""))
+        parts = Path(reference).parts
+        if (previous.get("conversation_id") == convo.uuid and len(parts) == 3
+                and parts[:2] == ("chat-history", platform_dir)
+                and parts[2].endswith(".md")):
+            candidate = private_root / reference
+            _assert_descendant(candidate, private_root)
+            if candidate.exists() and frontmatter.load(candidate).get("conversation_id") != convo.uuid:
+                raise FileExistsError("Existing private reference belongs to another conversation")
+            private_path = candidate
+            private_filename = candidate.name
+    if convo.source_url and private_path.exists():
+        previous_raw = frontmatter.load(private_path)
+        if previous_raw.get("capture_scope") != "visible-browser-thread":
+            # A visible DOM view must never replace a fuller official export.
+            private_path = private_dir / "kura-views" / f"{source_id_token}.md"
+            private_path.parent.mkdir(parents=True, exist_ok=True)
+            private_filename = str(private_path.relative_to(private_dir)).replace("\\", "/")
     private_post = frontmatter.Post(
         content=UNTRUSTED_BANNER + convo.to_raw_markdown() + UNTRUSTED_FOOTER,
         source=convo.platform,
@@ -81,6 +101,9 @@ def write_pair(
         message_count=len(convo.messages),
         trust="untrusted-data",
     )
+    if convo.source_url:
+        private_post["source_url"] = convo.source_url
+        private_post["capture_scope"] = "visible-browser-thread"
     _atomic_write_text(
         private_path,
         frontmatter.dumps(private_post),
@@ -122,6 +145,8 @@ def write_pair(
         trust="untrusted-data",
         tags=["draft", "needs-triage"],
     )
+    if convo.source_url:
+        brain_post["capture_scope"] = "visible-browser-thread"
     # The export's own per-conversation summary is high-signal: carry it into
     # frontmatter so agents (and the _INDEX map) can read it without opening the raw file.
     if convo.summary:
@@ -213,6 +238,11 @@ def _single_line(value: str) -> str:
     the tool's own, in the file the distilling agent reads.
     """
     return " ".join((value or "").split()) or "(untitled)"
+
+
+def _flat(value: str) -> str:
+    """Collapse a summary list item to one line so it cannot start a heading or bullet."""
+    return " ".join(str(value).split())
 
 
 def _titles_are_redacted() -> bool:
@@ -309,23 +339,23 @@ def _render_brain_body(summary: Summary) -> str:
     ]
     if summary.insights:
         lines.append("## Insights")
-        lines.extend(f"- {x}" for x in summary.insights)
+        lines.extend(f"- {_flat(x)}" for x in summary.insights)
         lines.append("")
     if summary.decisions:
         lines.append("## Decisions made")
-        lines.extend(f"- {x}" for x in summary.decisions)
+        lines.extend(f"- {_flat(x)}" for x in summary.decisions)
         lines.append("")
     if summary.open_questions:
         lines.append("## Open questions")
-        lines.extend(f"- {x}" for x in summary.open_questions)
+        lines.extend(f"- {_flat(x)}" for x in summary.open_questions)
         lines.append("")
     if summary.people_mentioned:
         lines.append("## People mentioned")
         for p in summary.people_mentioned:
-            lines.append(f"- **{p.name}** — {p.context}")
+            lines.append(f"- **{_flat(p.name)}** — {_flat(p.context)}")
         lines.append("")
     if summary.suggested_destinations:
         lines.append("## Suggested destinations")
-        lines.extend(f"- `{x}`" for x in summary.suggested_destinations)
+        lines.extend(f"- `{_flat(x)}`" for x in summary.suggested_destinations)
         lines.append("")
     return "\n".join(lines).rstrip() + UNTRUSTED_FOOTER

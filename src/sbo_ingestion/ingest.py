@@ -19,7 +19,9 @@ Three modes:
 from __future__ import annotations
 
 import sys
+import json
 from dataclasses import replace
+from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 
@@ -37,6 +39,7 @@ from sbo_ingestion.dual_write import (
 from sbo_ingestion.handlers import chatgpt as chatgpt_handler
 from sbo_ingestion.handlers import claude_ai as claude_ai_handler
 from sbo_ingestion.handlers import memories as memories_handler
+from sbo_ingestion.handlers import kura as kura_handler
 from sbo_ingestion.summarize import Summary, summarize
 
 Mode = Literal["agent", "api", "dry-run"]
@@ -93,6 +96,8 @@ def _detect_format(path: Path) -> str:
     export into the ChatGPT handler, where it died on the missing key.
     """
     suffix = path.suffix.lower()
+    if suffix == ".md" and path.name == "conversation.md":
+        return "kura"
     if suffix == ".jsonl":
         return "claude.ai"
     if suffix == ".zip":
@@ -122,6 +127,9 @@ def _resolve_export_paths(export_path: Path) -> list[Path]:
     if export_path.is_file():
         return [export_path]
     if export_path.is_dir():
+        captures = kura_handler.discover(export_path)
+        if captures:
+            return captures
         candidates = list(export_path.iterdir())
     else:
         candidates = list(export_path.parent.glob(export_path.name))
@@ -184,11 +192,15 @@ def ingest(
     is never read by MCP.
     """
     effective_mode = _resolve_mode(mode, dry_run=dry_run)
+    brain, private = brain_root.resolve(), private_root.resolve()
+    if brain.is_relative_to(private) or private.is_relative_to(brain):
+        raise ValueError("Brain and private vaults must be separate, non-overlapping roots")
 
     if effective_mode == "api" and not api_key:
         raise ValueError("api_key is required when mode='api'.")
 
     results: list[DualWriteResult] = []
+    brain_indexes: dict[str, dict[str, Path]] = {}
     for path in _resolve_export_paths(export_path):
         results.extend(
             _ingest_file(
@@ -198,6 +210,7 @@ def ingest(
                 api_key=api_key,
                 effective_mode=effective_mode,
                 memories_path=memories_path,
+                brain_indexes=brain_indexes,
             )
         )
     return results
@@ -211,9 +224,14 @@ def _ingest_file(
     api_key: str,
     effective_mode: Mode,
     memories_path: Path | None = None,
+    brain_indexes: dict[str, dict[str, Path]] | None = None,
 ) -> list[DualWriteResult]:
     """Ingest a single export file with an already-resolved mode."""
     fmt = _detect_format(export_path)
+    if fmt == "kura":
+        return _ingest_kura_capture(export_path, brain_root=brain_root, private_root=private_root,
+                                    api_key=api_key, effective_mode=effective_mode,
+                                    brain_indexes=brain_indexes)
     if fmt == "claude.ai":
         convos = claude_ai_handler.parse_export(export_path)
         selected_members = (export_path.name,)
@@ -293,6 +311,58 @@ def _ingest_file(
     )
 
     return results
+
+
+def _ingest_kura_capture(export_path: Path, *, brain_root: Path, private_root: Path,
+                         api_key: str, effective_mode: Mode,
+                         brain_indexes: dict[str, dict[str, Path]] | None = None) -> list[DualWriteResult]:
+    """Hash-based incremental capture intake with private revision receipts."""
+    convo = next(kura_handler.parse_export(export_path))
+    token = sha256(f"{convo.platform}:{convo.uuid}".encode()).hexdigest()
+    state_path = private_root / "_distill" / "kura" / f"{token}.json"
+    if not state_path.resolve().is_relative_to(private_root.resolve()):
+        raise ValueError("Kura receipt escapes private root")
+    payload = json.dumps({"title": convo.title, "messages": [(m.sender, m.text) for m in convo.messages]},
+                         ensure_ascii=False, sort_keys=True)
+    digest = sha256(payload.encode()).hexdigest()
+    with audit.exclusive_lock(state_path.with_suffix(".lock")):
+        state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
+        indexes = brain_indexes if brain_indexes is not None else {}
+        if convo.platform not in indexes:
+            indexes[convo.platform] = index_existing_brain_paths(brain_root=brain_root, platform=convo.platform)
+        existing = indexes[convo.platform]
+        raw = private_root / state.get("raw_path", "_missing")
+        if not raw.resolve().is_relative_to(private_root.resolve()):
+            raise ValueError("Kura receipt escapes private root")
+        raw_digest = sha256(raw.read_bytes()).hexdigest() if raw.is_file() else ""
+        if (state.get("content_sha256") == digest and convo.uuid in existing
+                and raw_digest and state.get("raw_sha256") == raw_digest):
+            return []
+        if raw.is_file():
+            # Keep the previous authoritative source before refreshing the active copy.
+            history = private_root / "_distill" / "kura" / "history" / token[:16] / f"{raw_digest[:32]}.md"
+            history.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write_text(history, raw.read_text(encoding="utf-8"), root=private_root)
+        summary = (summarize(convo, api_key=api_key) if effective_mode == "api" else
+                   _dry_run_summary(convo) if effective_mode == "dry-run" else _agent_stub_summary(convo))
+        result = write_pair(convo, summary, brain_root=brain_root, private_root=private_root,
+                            existing_brain_paths=existing)
+        if effective_mode == "agent" and not result.brain_preserved:
+            _mark_needs_summary(result.brain_path, brain_root=brain_root)
+        audit.record_ingest(private_root, conversation_id=convo.uuid, mode=effective_mode,
+                            fmt="kura", raw_path=result.private_path, brain_path=result.brain_path,
+                            source=export_path.name, brain_preserved=result.brain_preserved,
+                            private_root_for_rel=private_root, brain_root_for_rel=brain_root)
+        audit.record_import_receipt(private_root, source_name=export_path.name,
+                                    source_size=export_path.stat().st_size, fmt="kura",
+                                    selected_members=(export_path.name,), conversation_count=1,
+                                    brain_created=int(not result.brain_preserved),
+                                    brain_preserved=int(result.brain_preserved))
+        _atomic_write_text(state_path, json.dumps({"content_sha256": digest,
+                           "raw_sha256": sha256(result.private_path.read_bytes()).hexdigest(),
+                           "raw_path": str(result.private_path.relative_to(private_root)),
+                           "refresh_pending": result.brain_preserved}, indent=2), root=private_root)
+        return [result]
 
 
 def _mark_needs_summary(brain_path: Path, *, brain_root: Path) -> None:
@@ -420,7 +490,7 @@ def cli(
 
     results: list[DualWriteResult] = []
     try:
-        for path in files:
+        for path in export_paths:
             results.extend(
                 ingest(
                     path,
@@ -431,6 +501,9 @@ def cli(
                     memories_path=memories_path,
                 )
             )
+    except (ValueError, OSError) as e:
+        click.echo(f"[error] {e}", err=True)
+        sys.exit(1)
     except AnthropicError as e:
         click.echo(f"[error] Anthropic API call failed: {e}", err=True)
         sys.exit(1)

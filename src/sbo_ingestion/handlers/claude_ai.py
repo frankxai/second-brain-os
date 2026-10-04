@@ -31,6 +31,7 @@ class Conversation:
     messages: tuple[Message, ...]
     platform: str = "claude.ai"
     summary: str = ""  # per-conversation summary the Claude export carries, when present
+    source_url: str = ""
 
     def to_raw_markdown(self) -> str:
         """Render this conversation as the raw-vault markdown body (no frontmatter).
@@ -38,6 +39,8 @@ class Conversation:
         Frontmatter is added by dual_write.py, which knows the storage location.
         """
         lines: list[str] = [f"# {self.title}", ""]
+        if self.source_url:
+            lines.extend([f"Source: {self.source_url}", "Capture scope: visible browser thread", ""])
         for m in self.messages:
             lines.append(f"**{m.sender}** · {m.created_at}")
             lines.append("")
