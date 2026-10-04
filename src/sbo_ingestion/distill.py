@@ -32,7 +32,7 @@ DONE_STATUS = "triage"
 PENDING_RECEIPT = "distill_pending_receipt"
 
 
-def find_stubs(brain_root: Path, *, limit: int = 0) -> list[dict]:
+def find_stubs(brain_root: Path, *, limit: int = 0, after: str = "") -> list[dict]:
     """Stubs still awaiting a summary, with the private file each one points at.
 
     Cheap-checks each file before parsing it. Full YAML parsing of every stub took
@@ -47,6 +47,8 @@ def find_stubs(brain_root: Path, *, limit: int = 0) -> list[dict]:
     needle = f"status: {NEEDS_SUMMARY}"
     pending = []
     for path in sorted(inbox.rglob("*.md")):
+        if after and path.relative_to(brain_root).as_posix() <= after:
+            continue
         with path.open("r", encoding="utf-8") as handle:
             head = handle.read(FRONTMATTER_PEEK)
         if needle not in head and PENDING_RECEIPT not in head:
@@ -74,6 +76,7 @@ def complete_stub(stub_path: Path, private_root: Path, *, agent: str, model: str
     stub_path = stub_path.resolve()
     private_root = private_root.resolve()
     with audit.exclusive_lock(stub_path.with_suffix(".distill.lock")):
+        distill_packet.require_packet_hash(stub_path, private_root, source_sha256)
         if source_sha256:
             distill_packet.require_complete_coverage(stub_path, private_root, source_sha256)
         post = frontmatter.load(stub_path)
@@ -169,10 +172,17 @@ def complete(stub: Path, private_root: Path, agent: str, model: str, source_sha2
 @click.option("--private-root", required=True, type=click.Path(file_okay=False, path_type=Path))
 @click.option("--max-notes", type=click.IntRange(1, 10), default=3)
 @click.option("--source-budget", type=click.IntRange(256, 128_000), default=18_000)
-def plan(brain_root: Path, private_root: Path, max_notes: int, source_budget: int) -> None:
+@click.option("--after", default="", help="Resume after the returned relative next_cursor.")
+def plan(brain_root: Path, private_root: Path, max_notes: int, source_budget: int, after: str) -> None:
     """Select a small metadata-only distillation batch; large sources stay pending."""
-    click.echo(json.dumps(distill_packet.plan_batch(find_stubs(brain_root, limit=100),
-                     private_root, max_notes=max_notes, source_budget=source_budget), separators=(",", ":")))
+    if after and (not after.startswith("_inbox/") or any(part in {"", ".", ".."} for part in after.split("/"))
+                  or "\\" in after or ":" in after or len(after) > 1024):
+        raise click.ClickException("Invalid pending-note cursor")
+    stubs = find_stubs(brain_root, limit=101, after=after)
+    result = distill_packet.plan_batch(stubs[:100], private_root, max_notes=max_notes, source_budget=source_budget)
+    result.update(trust="untrusted-data", truncated=len(stubs) > 100,
+                  next_cursor=Path(stubs[99]["stub"]).relative_to(brain_root).as_posix() if len(stubs) > 100 else None)
+    click.echo(json.dumps(result, separators=(",", ":")))
 
 
 @cli.command("packet")
@@ -191,6 +201,35 @@ def packet_command(stub: Path, brain_root: Path, private_root: Path, offset: int
     except (ValueError, OSError) as error:
         raise click.ClickException(str(error)) from error
     click.echo(json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+@cli.command("ack")
+@click.argument("stub", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--brain-root", required=True, type=click.Path(file_okay=False, path_type=Path))
+@click.option("--private-root", required=True, type=click.Path(file_okay=False, path_type=Path))
+@click.option("--source-sha256", required=True)
+@click.option("--packet-token", required=True)
+def ack_command(stub: Path, brain_root: Path, private_root: Path, source_sha256: str, packet_token: str) -> None:
+    """Acknowledge a received packet; emission alone does not count as coverage."""
+    try:
+        result = distill_packet.acknowledge_packet(stub, brain_root=brain_root, private_root=private_root,
+                                                  digest=source_sha256, token=packet_token)
+    except (ValueError, OSError) as error:
+        raise click.ClickException(str(error)) from error
+    click.echo(json.dumps(result, separators=(",", ":")))
+
+
+@cli.command("reset-coverage")
+@click.argument("stub", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--private-root", required=True, type=click.Path(file_okay=False, path_type=Path))
+@click.option("--source-sha256", required=True)
+def reset_command(stub: Path, private_root: Path, source_sha256: str) -> None:
+    """Preserve the old receipt privately and start source coverage again."""
+    try:
+        distill_packet.reset_coverage(stub, private_root, source_sha256)
+    except (ValueError, OSError) as error:
+        raise click.ClickException(str(error)) from error
+    click.echo("Source-coverage receipt preserved; reread and acknowledge packets.")
 
 
 if __name__ == "__main__":
