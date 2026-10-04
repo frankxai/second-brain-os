@@ -4,6 +4,10 @@
 
 # Second Brain OS
 
+Kura browser captures now use the existing two-vault ingestion pipeline. See
+[capture and automation SOP](docs/automation.md) for supported inputs, repeat
+processing and source-change review.
+
 > An Obsidian second brain that reflects on its own corpus, cites everything it claims, and refuses to trust its own synthesis until an adversarial pass verifies it. Two vaults, and an append-only log of every crossing between them. Coding-agent-native — the compute is the session you already pay for.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)

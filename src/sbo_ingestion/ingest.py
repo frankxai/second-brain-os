@@ -19,12 +19,15 @@ Three modes:
 from __future__ import annotations
 
 import sys
+import json
 from dataclasses import replace
+from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 
 import click
 from anthropic import AnthropicError
+from yaml import YAMLError
 
 from sbo_ingestion import audit
 from sbo_ingestion.dual_write import (
@@ -37,10 +40,19 @@ from sbo_ingestion.dual_write import (
 from sbo_ingestion.handlers import chatgpt as chatgpt_handler
 from sbo_ingestion.handlers import claude_ai as claude_ai_handler
 from sbo_ingestion.handlers import memories as memories_handler
+from sbo_ingestion.handlers import kura as kura_handler
 from sbo_ingestion.summarize import Summary, summarize
 
 Mode = Literal["agent", "api", "dry-run"]
 DEFAULT_MODE: Mode = "agent"
+
+
+class CaptureBatchError(ValueError):
+    """A bounded capture batch completed its healthy inputs before failing."""
+    def __init__(self, failures: list[str], results: list[DualWriteResult]):
+        super().__init__("Capture failures after processing healthy inputs:\n" + "\n".join(failures))
+        self.results = results
+        self.failures = failures
 
 
 def _agent_stub_summary(convo) -> Summary:  # type: ignore[no-untyped-def]
@@ -93,6 +105,8 @@ def _detect_format(path: Path) -> str:
     export into the ChatGPT handler, where it died on the missing key.
     """
     suffix = path.suffix.lower()
+    if suffix == ".md" and path.name == "conversation.md":
+        return "kura"
     if suffix == ".jsonl":
         return "claude.ai"
     if suffix == ".zip":
@@ -113,7 +127,7 @@ def _detect_format(path: Path) -> str:
     )
 
 
-def _resolve_export_paths(export_path: Path) -> list[Path]:
+def _resolve_export_paths(export_path: Path, failures: list[str] | None = None) -> list[Path]:
     """Expand a file, a directory, or a glob into a sorted list of export files.
 
     Modern ChatGPT exports ship sharded as ``conversations-000.json`` …
@@ -122,6 +136,12 @@ def _resolve_export_paths(export_path: Path) -> list[Path]:
     if export_path.is_file():
         return [export_path]
     if export_path.is_dir():
+        discovery_failures: list[str] | None = [] if failures is not None else None
+        captures = kura_handler.discover(export_path, discovery_failures)
+        if discovery_failures:
+            failures.extend(discovery_failures)
+        if captures or discovery_failures:
+            return captures
         candidates = list(export_path.iterdir())
     else:
         candidates = list(export_path.parent.glob(export_path.name))
@@ -184,22 +204,33 @@ def ingest(
     is never read by MCP.
     """
     effective_mode = _resolve_mode(mode, dry_run=dry_run)
+    brain, private = brain_root.resolve(), private_root.resolve()
+    if brain.is_relative_to(private) or private.is_relative_to(brain):
+        raise ValueError("Brain and private vaults must be separate, non-overlapping roots")
 
     if effective_mode == "api" and not api_key:
         raise ValueError("api_key is required when mode='api'.")
 
     results: list[DualWriteResult] = []
-    for path in _resolve_export_paths(export_path):
-        results.extend(
-            _ingest_file(
+    brain_indexes: dict[str, dict[str, Path]] = {}
+    failures: list[str] = []
+    for path in _resolve_export_paths(export_path, failures):
+        try:
+            results.extend(_ingest_file(
                 path,
                 brain_root=brain_root,
                 private_root=private_root,
                 api_key=api_key,
                 effective_mode=effective_mode,
                 memories_path=memories_path,
-            )
-        )
+                brain_indexes=brain_indexes,
+            ))
+        except (ValueError, OSError) as error:
+            if path.name != "conversation.md":
+                raise
+            failures.append(f"{path}: {error}")
+    if failures:
+        raise CaptureBatchError(failures, results)
     return results
 
 
@@ -211,9 +242,14 @@ def _ingest_file(
     api_key: str,
     effective_mode: Mode,
     memories_path: Path | None = None,
+    brain_indexes: dict[str, dict[str, Path]] | None = None,
 ) -> list[DualWriteResult]:
     """Ingest a single export file with an already-resolved mode."""
     fmt = _detect_format(export_path)
+    if fmt == "kura":
+        return _ingest_kura_capture(export_path, brain_root=brain_root, private_root=private_root,
+                                    api_key=api_key, effective_mode=effective_mode,
+                                    brain_indexes=brain_indexes)
     if fmt == "claude.ai":
         convos = claude_ai_handler.parse_export(export_path)
         selected_members = (export_path.name,)
@@ -236,7 +272,7 @@ def _ingest_file(
     )
     for convo in convos:
         platform = convo.platform
-        if effective_mode == "api":
+        if effective_mode == "api" and convo.uuid not in existing_brain_paths:
             summary = summarize(convo, api_key=api_key)
         elif effective_mode == "dry-run":
             summary = _dry_run_summary(convo)
@@ -293,6 +329,61 @@ def _ingest_file(
     )
 
     return results
+
+
+def _ingest_kura_capture(export_path: Path, *, brain_root: Path, private_root: Path,
+                         api_key: str, effective_mode: Mode,
+                         brain_indexes: dict[str, dict[str, Path]] | None = None) -> list[DualWriteResult]:
+    """Hash-based incremental capture intake with private revision receipts."""
+    convo = next(kura_handler.parse_export(export_path))
+    token = sha256(f"{convo.platform}:{convo.uuid}".encode()).hexdigest()
+    state_path = private_root / "_distill" / "kura" / f"{token}.json"
+    if not state_path.resolve().is_relative_to(private_root.resolve()):
+        raise ValueError("Kura receipt escapes private root")
+    payload = json.dumps({"title": convo.title, "messages": [(m.sender, m.text) for m in convo.messages]},
+                         ensure_ascii=False, sort_keys=True)
+    digest = sha256(payload.encode()).hexdigest()
+    with audit.exclusive_lock(state_path.with_suffix(".lock")):
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
+        except json.JSONDecodeError as error:
+            raise ValueError("Invalid private Kura receipt; restore it from a private backup before retrying") from error
+        if (not isinstance(state, dict) or (state and (
+                not isinstance(state.get("raw_path"), str)
+                or not isinstance(state.get("content_sha256"), str)
+                or type(state.get("refresh_pending")) is not bool))):
+            raise ValueError("Invalid private Kura receipt fields; restore the receipt before retrying")
+        indexes = brain_indexes if brain_indexes is not None else {}
+        if convo.platform not in indexes:
+            indexes[convo.platform] = index_existing_brain_paths(brain_root=brain_root, platform=convo.platform)
+        existing = indexes[convo.platform]
+        raw = private_root / state.get("raw_path", "_missing")
+        if not raw.resolve().is_relative_to(private_root.resolve()):
+            raise ValueError("Kura receipt escapes private root")
+        raw_digest = sha256(raw.read_bytes()).hexdigest() if raw.is_file() else ""
+        if (state.get("content_sha256") == digest and convo.uuid in existing
+                and raw_digest and state.get("raw_sha256") == raw_digest):
+            return []
+        summary = (summarize(convo, api_key=api_key) if effective_mode == "api" and convo.uuid not in existing else
+                   _dry_run_summary(convo) if effective_mode == "dry-run" else _agent_stub_summary(convo))
+        result = write_pair(convo, summary, brain_root=brain_root, private_root=private_root,
+                            existing_brain_paths=existing)
+        if effective_mode == "agent" and not result.brain_preserved:
+            _mark_needs_summary(result.brain_path, brain_root=brain_root)
+        audit.record_ingest(private_root, conversation_id=convo.uuid, mode=effective_mode,
+                            fmt="kura", raw_path=result.private_path, brain_path=result.brain_path,
+                            source=export_path.name, brain_preserved=result.brain_preserved,
+                            private_root_for_rel=private_root, brain_root_for_rel=brain_root)
+        audit.record_import_receipt(private_root, source_name=export_path.name,
+                                    source_size=export_path.stat().st_size, fmt="kura",
+                                    selected_members=(export_path.name,), conversation_count=1,
+                                    brain_created=int(not result.brain_preserved),
+                                    brain_preserved=int(result.brain_preserved))
+        _atomic_write_text(state_path, json.dumps({"content_sha256": digest,
+                           "raw_sha256": sha256(result.private_path.read_bytes()).hexdigest(),
+                           "raw_path": result.private_path.relative_to(private_root).as_posix(),
+                           "refresh_pending": result.brain_preserved}, indent=2), root=private_root)
+        return [result]
 
 
 def _mark_needs_summary(brain_path: Path, *, brain_root: Path) -> None:
@@ -404,7 +495,7 @@ def cli(
         sys.exit(1)
 
     try:
-        files = [f for p in export_paths for f in _resolve_export_paths(p)]
+        files = [f for p in export_paths for f in _resolve_export_paths(p, [])]
     except ValueError as e:
         click.echo(f"[error] {e}", err=True)
         sys.exit(1)
@@ -419,18 +510,24 @@ def cli(
         click.echo("[sbo] DRY-RUN: no API call; stub summaries; no follow-up expected.")
 
     results: list[DualWriteResult] = []
+    failures: list[str] = []
     try:
-        for path in files:
-            results.extend(
-                ingest(
+        for path in export_paths:
+            try:
+                results.extend(ingest(
                     path,
                     brain_root=brain_root,
                     private_root=private_root,
                     api_key=api_key,
                     mode=effective_mode,
                     memories_path=memories_path,
-                )
-            )
+                ))
+            except CaptureBatchError as error:
+                results.extend(error.results)
+                failures.extend(error.failures)
+    except (ValueError, OSError, YAMLError) as e:
+        click.echo(f"[error] {e}", err=True)
+        sys.exit(1)
     except AnthropicError as e:
         click.echo(f"[error] Anthropic API call failed: {e}", err=True)
         sys.exit(1)
@@ -439,6 +536,11 @@ def cli(
         click.echo(f"  raw:     {r.private_path}")
         click.echo(f"  summary: {r.brain_path}")
     click.echo(f"[sbo] audit:   {private_root}/_distill/audit.jsonl")
+    if failures:
+        click.echo(f"[error] {len(failures)} capture(s) failed; healthy results and receipts are preserved", err=True)
+        for failure in failures:
+            click.echo(f"[error] {failure}", err=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

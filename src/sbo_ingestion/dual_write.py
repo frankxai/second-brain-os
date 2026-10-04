@@ -16,12 +16,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
-from uuid import uuid4
 
 import frontmatter
 from slugify import slugify
 
 from sbo_ingestion.handlers.claude_ai import Conversation
+from sbo_ingestion import audit
 from sbo_ingestion.summarize import Summary
 
 
@@ -66,9 +66,44 @@ def write_pair(
 
     # Private (raw)
     private_dir = private_root / "chat-history" / platform_dir
+    _assert_descendant(private_dir, private_root)
     private_dir.mkdir(parents=True, exist_ok=True)
     private_filename = f"{date}-{source_id_token}.md"
     private_path = private_dir / private_filename
+    brain_dir = brain_root / "_inbox" / platform_dir
+    canonical_brain_path = brain_dir / f"{date}-{conversation_token}.md"
+    brain_path = (existing_brain_paths or {}).get(convo.uuid, canonical_brain_path)
+    _assert_descendant(brain_path, brain_root)
+    if brain_path.exists() and frontmatter.load(brain_path).get("conversation_id") != convo.uuid:
+        raise FileExistsError(f"Brain path collision for conversation {convo.uuid}: {brain_path}")
+    previous_brain = (existing_brain_paths or {}).get(convo.uuid)
+    if previous_brain and previous_brain.exists():
+        _assert_descendant(previous_brain, brain_root)
+        previous = frontmatter.load(previous_brain)
+        reference = str(previous.get("private_file", ""))
+        parts = Path(reference).parts
+        if (previous.get("conversation_id") == convo.uuid and len(parts) == 3
+                and parts[:2] == ("chat-history", platform_dir)
+                and parts[2].endswith(".md")):
+            candidate = private_root / reference
+            _assert_descendant(candidate, private_root)
+            if candidate.exists() and frontmatter.load(candidate).get("conversation_id") != convo.uuid:
+                raise FileExistsError("Existing private reference belongs to another conversation")
+            private_path = candidate
+            private_filename = candidate.name
+    _assert_descendant(private_path, private_root)
+    if private_path.exists() and frontmatter.load(private_path).get("conversation_id") != convo.uuid:
+        raise FileExistsError("Private path belongs to another conversation")
+    if convo.source_url and private_path.exists():
+        previous_raw = frontmatter.load(private_path)
+        if previous_raw.get("capture_scope") != "visible-browser-thread":
+            # A visible DOM view must never replace a fuller official export.
+            private_path = private_dir / "kura-views" / f"{source_id_token}.md"
+            private_path.parent.mkdir(parents=True, exist_ok=True)
+            private_filename = str(private_path.relative_to(private_dir)).replace("\\", "/")
+    _assert_descendant(private_path, private_root)
+    if private_path.exists() and frontmatter.load(private_path).get("conversation_id") != convo.uuid:
+        raise FileExistsError("Private view path belongs to another conversation")
     private_post = frontmatter.Post(
         content=UNTRUSTED_BANNER + convo.to_raw_markdown() + UNTRUSTED_FOOTER,
         source=convo.platform,
@@ -80,11 +115,20 @@ def write_pair(
         message_count=len(convo.messages),
         trust="untrusted-data",
     )
-    _atomic_write_text(
-        private_path,
-        frontmatter.dumps(private_post),
-        root=private_root,
-    )
+    if convo.source_url:
+        private_post["source_url"] = convo.source_url
+        private_post["capture_scope"] = "visible-browser-thread"
+    rendered_raw = frontmatter.dumps(private_post)
+    if convo.source_url and private_path.exists():
+        previous_text = private_path.read_text(encoding="utf-8")
+        if previous_text != rendered_raw:
+            token = sha256(f"{convo.platform}:{convo.uuid}".encode()).hexdigest()[:16]
+            digest = sha256(previous_text.encode()).hexdigest()[:32]
+            history = private_root / "_distill" / "kura" / "history" / token / f"{digest}.md"
+            _assert_descendant(history, private_root)
+            history.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write_text(history, previous_text, root=private_root)
+    _atomic_write_text(private_path, rendered_raw, root=private_root)
 
     # Brain (summary)
     brain_dir = brain_root / "_inbox" / platform_dir
@@ -121,6 +165,8 @@ def write_pair(
         trust="untrusted-data",
         tags=["draft", "needs-triage"],
     )
+    if convo.source_url:
+        brain_post["capture_scope"] = "visible-browser-thread"
     # The export's own per-conversation summary is high-signal: carry it into
     # frontmatter so agents (and the _INDEX map) can read it without opening the raw file.
     if convo.summary:
@@ -240,14 +286,9 @@ def _assert_descendant(path: Path, parent: Path) -> None:
 
 
 def _atomic_write_text(path: Path, text: str, *, root: Path) -> None:
-    """Write UTF-8 text with an atomic same-directory replace."""
+    """Flush UTF-8 text before atomic replacement; keep private POSIX modes."""
     _assert_descendant(path, root)
-    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-    try:
-        temporary.write_text(text, encoding="utf-8")
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    audit.atomic_write_text(path, text)
 
 
 def write_index(
