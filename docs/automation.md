@@ -52,9 +52,12 @@ when the existing brain note refers to an official export; the official source
 and the brain note's reference are preserved.
 
 If a pass stops, fix the reported file and repeat the command. Completed Kura
-items are skipped on retry. Receipts use atomic writes and cooperating-process
+items are skipped on retry. A damaged capture is isolated while healthy inputs
+in the same folder continue; the pass reports failures and exits non-zero at the
+end. Receipts use flushed atomic writes and cooperating-process
 locks. Interrupted writes do not mark a capture complete. Do not delete locks
 based on age. Restore malformed receipts from a private backup before retrying.
+Source revisions are retained even when a receipt is missing and intake resumes.
 
 ## Daily and weekly operation
 

@@ -16,12 +16,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
-from uuid import uuid4
 
 import frontmatter
 from slugify import slugify
 
 from sbo_ingestion.handlers.claude_ai import Conversation
+from sbo_ingestion import audit
 from sbo_ingestion.summarize import Summary
 
 
@@ -118,11 +118,17 @@ def write_pair(
     if convo.source_url:
         private_post["source_url"] = convo.source_url
         private_post["capture_scope"] = "visible-browser-thread"
-    _atomic_write_text(
-        private_path,
-        frontmatter.dumps(private_post),
-        root=private_root,
-    )
+    rendered_raw = frontmatter.dumps(private_post)
+    if convo.source_url and private_path.exists():
+        previous_text = private_path.read_text(encoding="utf-8")
+        if previous_text != rendered_raw:
+            token = sha256(f"{convo.platform}:{convo.uuid}".encode()).hexdigest()[:16]
+            digest = sha256(previous_text.encode()).hexdigest()[:32]
+            history = private_root / "_distill" / "kura" / "history" / token / f"{digest}.md"
+            _assert_descendant(history, private_root)
+            history.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write_text(history, previous_text, root=private_root)
+    _atomic_write_text(private_path, rendered_raw, root=private_root)
 
     # Brain (summary)
     brain_dir = brain_root / "_inbox" / platform_dir
@@ -280,14 +286,9 @@ def _assert_descendant(path: Path, parent: Path) -> None:
 
 
 def _atomic_write_text(path: Path, text: str, *, root: Path) -> None:
-    """Write UTF-8 text with an atomic same-directory replace."""
+    """Flush UTF-8 text before atomic replacement; keep private POSIX modes."""
     _assert_descendant(path, root)
-    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-    try:
-        temporary.write_text(text, encoding="utf-8")
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    audit.atomic_write_text(path, text)
 
 
 def write_index(

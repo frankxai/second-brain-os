@@ -4,7 +4,7 @@ from unittest.mock import patch
 import frontmatter
 import pytest
 
-from sbo_ingestion.ingest import ingest
+from sbo_ingestion.ingest import ingest, CaptureBatchError
 from tests.test_kura import capture
 
 
@@ -84,3 +84,29 @@ def test_changed_capture_does_not_spend_api_money_for_a_preserved_note(tmp_path,
         result = ingest(source, brain_root=brain, private_root=private, mode="api", api_key="test")
         assert result[0].brain_preserved
         model.assert_not_called()
+
+
+def test_damaged_capture_does_not_block_later_healthy_inputs(tmp_path, tmp_vault_pair):
+    brain, private = tmp_vault_pair
+    root = tmp_path / 'Kura'
+    broken = capture(root / 'chatgpt' / '2026-10-04_a' / 'conversation.md')
+    broken.with_name('capture.json').write_text('{"kind": "unfinished"}', encoding='utf-8')
+    capture(root / 'chatgpt' / '2026-10-04_b' / 'conversation.md')
+    with pytest.raises(CaptureBatchError) as error:
+        ingest(root, brain_root=brain, private_root=private)
+    assert len(error.value.results) == 1
+    assert 'A source-backed answer' in error.value.results[0].private_path.read_text(encoding='utf-8')
+    assert str(broken) in str(error.value)
+
+
+def test_reset_receipt_cannot_erase_previous_private_source(tmp_path, tmp_vault_pair):
+    brain, private = tmp_vault_pair
+    source = capture(tmp_path / 'conversation.md')
+    first = ingest(source, brain_root=brain, private_root=private)[0]
+    original = first.private_path.read_text(encoding='utf-8')
+    next((private / '_distill' / 'kura').glob('*.json')).unlink()
+    capture(source, answer='Revised after a receipt reset')
+    ingest(source, brain_root=brain, private_root=private)
+    history = list((private / '_distill' / 'kura' / 'history').glob('*/*.md'))
+    assert len(history) == 1
+    assert history[0].read_text(encoding='utf-8') == original

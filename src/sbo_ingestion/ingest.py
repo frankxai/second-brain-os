@@ -46,6 +46,13 @@ Mode = Literal["agent", "api", "dry-run"]
 DEFAULT_MODE: Mode = "agent"
 
 
+class CaptureBatchError(ValueError):
+    """A bounded capture batch completed its healthy inputs before failing."""
+    def __init__(self, failures: list[str], results: list[DualWriteResult]):
+        super().__init__("Capture failures after processing healthy inputs:\n" + "\n".join(failures))
+        self.results = results
+
+
 def _agent_stub_summary(convo) -> Summary:  # type: ignore[no-untyped-def]
     """Stub Summary written in agent mode. The /distill-inbox agent fills the real one."""
     return Summary(
@@ -201,9 +208,10 @@ def ingest(
 
     results: list[DualWriteResult] = []
     brain_indexes: dict[str, dict[str, Path]] = {}
+    failures: list[str] = []
     for path in _resolve_export_paths(export_path):
-        results.extend(
-            _ingest_file(
+        try:
+            results.extend(_ingest_file(
                 path,
                 brain_root=brain_root,
                 private_root=private_root,
@@ -211,8 +219,13 @@ def ingest(
                 effective_mode=effective_mode,
                 memories_path=memories_path,
                 brain_indexes=brain_indexes,
-            )
-        )
+            ))
+        except (ValueError, OSError) as error:
+            if path.name != "conversation.md":
+                raise
+            failures.append(f"{path}: {error}")
+    if failures:
+        raise CaptureBatchError(failures, results)
     return results
 
 
@@ -346,11 +359,6 @@ def _ingest_kura_capture(export_path: Path, *, brain_root: Path, private_root: P
         if (state.get("content_sha256") == digest and convo.uuid in existing
                 and raw_digest and state.get("raw_sha256") == raw_digest):
             return []
-        if raw.is_file():
-            # Keep the previous authoritative source before refreshing the active copy.
-            history = private_root / "_distill" / "kura" / "history" / token[:16] / f"{raw_digest[:32]}.md"
-            history.parent.mkdir(parents=True, exist_ok=True)
-            _atomic_write_text(history, raw.read_text(encoding="utf-8"), root=private_root)
         summary = (summarize(convo, api_key=api_key) if effective_mode == "api" and convo.uuid not in existing else
                    _dry_run_summary(convo) if effective_mode == "dry-run" else _agent_stub_summary(convo))
         result = write_pair(convo, summary, brain_root=brain_root, private_root=private_root,
@@ -509,6 +517,10 @@ def cli(
                     memories_path=memories_path,
                 )
             )
+    except CaptureBatchError as e:
+        click.echo(f"[sbo] completed {len(e.results)} healthy capture(s); their receipts are preserved", err=True)
+        click.echo(f"[error] {e}", err=True)
+        sys.exit(1)
     except (ValueError, OSError) as e:
         click.echo(f"[error] {e}", err=True)
         sys.exit(1)

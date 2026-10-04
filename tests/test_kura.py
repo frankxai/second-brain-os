@@ -59,7 +59,7 @@ def test_actual_kura_exporter_fixture():
     assert convo.uuid == 'fixture-e2e'
     assert convo.title == 'Capture pipeline fixture 🧠'
     assert [message.sender for message in convo.messages] == ['human', 'assistant']
-    assert convo.messages[0].text == 'Keep raw sources private.'
+    assert convo.messages[0].text == '\ufeffKeep raw sources private. 🧠\r\nPreserve original message whitespace.\ufeff'
     assert convo.messages[1].created_at == '2026-10-04T10:01:00Z'
     assert convo.messages[1].text == 'Create a reviewed note with a source reference.\n\n```md\n## You\n```'
 

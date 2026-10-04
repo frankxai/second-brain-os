@@ -25,6 +25,7 @@ PLATFORMS = {
 }
 MAX_CAPTURE_BYTES = 64 * 1024 * 1024
 MAX_CAPTURES = 10_000
+JS_WHITESPACE = "\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 
 
 def discover(root: Path) -> list[Path]:
@@ -115,7 +116,7 @@ def parse_export(path: Path):
             stamp = f" <sub>· {message['timestamp']}</sub>" if message.get("timestamp") and packet.get("includeTimestamps", True) else ""
             prefix = f"## {role_label}{stamp}\n\n".encode("utf-16-le")
             start, end = span["start"] * 2, (span["start"] + span["length"]) * 2
-            expected_text = message["content"].strip().replace("\r\n", "\n").encode("utf-16-le")
+            expected_text = message["content"].strip(JS_WHITESPACE).replace("\r\n", "\n").encode("utf-16-le")
             if (start - len(prefix) < previous_end or end > len(encoded_body)
                     or encoded_body[start-len(prefix):start] != prefix
                     or encoded_body[start:end] != expected_text):

@@ -11,7 +11,7 @@
   "messages": [
     {
       "role": "user",
-      "content": "Keep raw sources private."
+      "content": "﻿Keep raw sources private. 🧠\r\nPreserve original message whitespace.﻿"
     },
     {
       "role": "assistant",
@@ -22,13 +22,13 @@
   "messageSpans": [
     {
       "start": 185,
-      "length": 25
+      "length": 66
     },
     {
-      "start": 259,
+      "start": 300,
       "length": 65
     }
   ],
   "includeTimestamps": true,
-  "renderedBody": "# Capture pipeline fixture 🧠\n\n> **Platform:** chatgpt · **Source:** [https://chatgpt.com/c/fixture-e2e](https://chatgpt.com/c/fixture-e2e) · **Captured:** 2026-10-04T10:00:00Z\n## You\n\nKeep raw sources private.\n\n\n## ChatGPT <sub>· 2026-10-04T10:01:00Z</sub>\n\nCreate a reviewed note with a source reference.\n\n```md\n## You\n```\n\n---\n\n*Captured by [Kura](https://github.com/frankxai/arcanea-vault) · schema v0.2.0*"
+  "renderedBody": "# Capture pipeline fixture 🧠\n\n> **Platform:** chatgpt · **Source:** [https://chatgpt.com/c/fixture-e2e](https://chatgpt.com/c/fixture-e2e) · **Captured:** 2026-10-04T10:00:00Z\n## You\n\nKeep raw sources private. 🧠\nPreserve original message whitespace.\n\n\n## ChatGPT <sub>· 2026-10-04T10:01:00Z</sub>\n\nCreate a reviewed note with a source reference.\n\n```md\n## You\n```\n\n---\n\n*Captured by [Kura](https://github.com/frankxai/arcanea-vault) · schema v0.2.0*"
 }

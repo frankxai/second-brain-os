@@ -25,7 +25,8 @@ tags: []
 > **Platform:** chatgpt · **Source:** [https://chatgpt.com/c/fixture-e2e](https://chatgpt.com/c/fixture-e2e) · **Captured:** 2026-10-04T10:00:00Z
 ## You
 
-Keep raw sources private.
+Keep raw sources private. 🧠
+Preserve original message whitespace.
 
 
 ## ChatGPT <sub>· 2026-10-04T10:01:00Z</sub>
