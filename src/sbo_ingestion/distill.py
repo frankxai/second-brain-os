@@ -3,7 +3,7 @@
 The distill step runs inside a coding-agent session rather than in Python: the
 agent reads a stub, opens the raw conversation it points at, writes a real
 summary back, and marks the stub done. That design is what makes distillation
-cost nothing extra — the session is already paid for.
+use the active agent's context without making a separate paid API call.
 
 It leaves two things that must not be left to the agent's discretion. Finding
 the stubs that still need work is fiddly frontmatter parsing, and recording the
@@ -23,6 +23,7 @@ import click
 import frontmatter
 
 from sbo_ingestion import audit
+from sbo_ingestion import distill_packet
 
 NEEDS_SUMMARY = "needs-summary"
 # Frontmatter sits at the top of the file; this is generous for it.
@@ -67,11 +68,14 @@ def find_stubs(brain_root: Path, *, limit: int = 0) -> list[dict]:
     return pending
 
 
-def complete_stub(stub_path: Path, private_root: Path, *, agent: str, model: str = "") -> Path:
+def complete_stub(stub_path: Path, private_root: Path, *, agent: str, model: str = "",
+                  source_sha256: str = "") -> Path:
     """Save the note before its receipt, recovering interrupted work on retry."""
     stub_path = stub_path.resolve()
     private_root = private_root.resolve()
     with audit.exclusive_lock(stub_path.with_suffix(".distill.lock")):
+        if source_sha256:
+            distill_packet.require_complete_coverage(stub_path, private_root, source_sha256)
         post = frontmatter.load(stub_path)
         pending = post.get(PENDING_RECEIPT)
         digest = sha256(post.content.encode("utf-8")).hexdigest()
@@ -104,6 +108,9 @@ def complete_stub(stub_path: Path, private_root: Path, *, agent: str, model: str
                 "private_root_sha256": vault_digest,
             }
             post[PENDING_RECEIPT] = pending
+            if source_sha256:
+                post["distill_source_sha256"] = source_sha256
+                post["distill_source_coverage"] = "complete"
             post["status"] = DONE_STATUS
             tags = [t for t in (post.get("tags") or []) if t != NEEDS_SUMMARY]
             post["tags"] = tags or ["triage"]
@@ -147,10 +154,43 @@ def list_pending(brain_root: Path, limit: int) -> None:
 )
 @click.option("--agent", required=True, help="Which agent distilled it, e.g. claude-code.")
 @click.option("--model", default="", help="Model name, when the agent knows it.")
-def complete(stub: Path, private_root: Path, agent: str, model: str) -> None:
+@click.option("--source-sha256", default="", help="Require complete packet coverage of this unchanged source.")
+def complete(stub: Path, private_root: Path, agent: str, model: str, source_sha256: str) -> None:
     """Flip a stub to distilled and append its audit event."""
-    receipt = complete_stub(stub, private_root, agent=agent, model=model)
+    try:
+        receipt = complete_stub(stub, private_root, agent=agent, model=model, source_sha256=source_sha256)
+    except (ValueError, OSError) as error:
+        raise click.ClickException(str(error)) from error
     click.echo(f"[sbo] distilled {stub.name} -> {receipt}")
+
+
+@cli.command("plan")
+@click.option("--brain-root", required=True, type=click.Path(file_okay=False, path_type=Path))
+@click.option("--private-root", required=True, type=click.Path(file_okay=False, path_type=Path))
+@click.option("--max-notes", type=click.IntRange(1, 10), default=3)
+@click.option("--source-budget", type=click.IntRange(256, 128_000), default=18_000)
+def plan(brain_root: Path, private_root: Path, max_notes: int, source_budget: int) -> None:
+    """Select a small metadata-only distillation batch; large sources stay pending."""
+    click.echo(json.dumps(distill_packet.plan_batch(find_stubs(brain_root, limit=100),
+                     private_root, max_notes=max_notes, source_budget=source_budget), separators=(",", ":")))
+
+
+@cli.command("packet")
+@click.argument("stub", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--brain-root", required=True, type=click.Path(file_okay=False, path_type=Path))
+@click.option("--private-root", required=True, type=click.Path(file_okay=False, path_type=Path))
+@click.option("--offset", type=click.IntRange(min=0), default=0)
+@click.option("--max-bytes", type=click.IntRange(256, 32_000), default=6000)
+@click.option("--source-sha256", default="")
+def packet_command(stub: Path, brain_root: Path, private_root: Path, offset: int,
+                   max_bytes: int, source_sha256: str) -> None:
+    """Read one bounded private source packet locally; never expose this through MCP."""
+    try:
+        result = distill_packet.packet(stub, brain_root=brain_root, private_root=private_root,
+                   offset=offset, max_bytes=max_bytes, expected_sha256=source_sha256)
+    except (ValueError, OSError) as error:
+        raise click.ClickException(str(error)) from error
+    click.echo(json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 
 
 if __name__ == "__main__":
