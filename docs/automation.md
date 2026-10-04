@@ -58,6 +58,10 @@ end. Receipts use flushed atomic writes and cooperating-process
 locks. Interrupted writes do not mark a capture complete. Do not delete locks
 based on age. Restore malformed receipts from a private backup before retrying.
 Source revisions are retained even when a receipt is missing and intake resumes.
+Malformed destination-vault notes are an integrity failure: repair them before
+continuing. They are not silently ignored, because their curated identities must
+remain protected. Escaping source symlinks are reported without reading them;
+other captures inside the selected root still run.
 
 ## Daily and weekly operation
 

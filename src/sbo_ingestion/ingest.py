@@ -27,6 +27,7 @@ from typing import Literal
 
 import click
 from anthropic import AnthropicError
+from yaml import YAMLError
 
 from sbo_ingestion import audit
 from sbo_ingestion.dual_write import (
@@ -51,6 +52,7 @@ class CaptureBatchError(ValueError):
     def __init__(self, failures: list[str], results: list[DualWriteResult]):
         super().__init__("Capture failures after processing healthy inputs:\n" + "\n".join(failures))
         self.results = results
+        self.failures = failures
 
 
 def _agent_stub_summary(convo) -> Summary:  # type: ignore[no-untyped-def]
@@ -125,7 +127,7 @@ def _detect_format(path: Path) -> str:
     )
 
 
-def _resolve_export_paths(export_path: Path) -> list[Path]:
+def _resolve_export_paths(export_path: Path, failures: list[str] | None = None) -> list[Path]:
     """Expand a file, a directory, or a glob into a sorted list of export files.
 
     Modern ChatGPT exports ship sharded as ``conversations-000.json`` …
@@ -134,8 +136,11 @@ def _resolve_export_paths(export_path: Path) -> list[Path]:
     if export_path.is_file():
         return [export_path]
     if export_path.is_dir():
-        captures = kura_handler.discover(export_path)
-        if captures:
+        discovery_failures: list[str] | None = [] if failures is not None else None
+        captures = kura_handler.discover(export_path, discovery_failures)
+        if discovery_failures:
+            failures.extend(discovery_failures)
+        if captures or discovery_failures:
             return captures
         candidates = list(export_path.iterdir())
     else:
@@ -209,7 +214,7 @@ def ingest(
     results: list[DualWriteResult] = []
     brain_indexes: dict[str, dict[str, Path]] = {}
     failures: list[str] = []
-    for path in _resolve_export_paths(export_path):
+    for path in _resolve_export_paths(export_path, failures):
         try:
             results.extend(_ingest_file(
                 path,
@@ -490,7 +495,7 @@ def cli(
         sys.exit(1)
 
     try:
-        files = [f for p in export_paths for f in _resolve_export_paths(p)]
+        files = [f for p in export_paths for f in _resolve_export_paths(p, [])]
     except ValueError as e:
         click.echo(f"[error] {e}", err=True)
         sys.exit(1)
@@ -505,23 +510,22 @@ def cli(
         click.echo("[sbo] DRY-RUN: no API call; stub summaries; no follow-up expected.")
 
     results: list[DualWriteResult] = []
+    failures: list[str] = []
     try:
         for path in export_paths:
-            results.extend(
-                ingest(
+            try:
+                results.extend(ingest(
                     path,
                     brain_root=brain_root,
                     private_root=private_root,
                     api_key=api_key,
                     mode=effective_mode,
                     memories_path=memories_path,
-                )
-            )
-    except CaptureBatchError as e:
-        click.echo(f"[sbo] completed {len(e.results)} healthy capture(s); their receipts are preserved", err=True)
-        click.echo(f"[error] {e}", err=True)
-        sys.exit(1)
-    except (ValueError, OSError) as e:
+                ))
+            except CaptureBatchError as error:
+                results.extend(error.results)
+                failures.extend(error.failures)
+    except (ValueError, OSError, YAMLError) as e:
         click.echo(f"[error] {e}", err=True)
         sys.exit(1)
     except AnthropicError as e:
@@ -532,6 +536,11 @@ def cli(
         click.echo(f"  raw:     {r.private_path}")
         click.echo(f"  summary: {r.brain_path}")
     click.echo(f"[sbo] audit:   {private_root}/_distill/audit.jsonl")
+    if failures:
+        click.echo(f"[error] {len(failures)} capture(s) failed; healthy results and receipts are preserved", err=True)
+        for failure in failures:
+            click.echo(f"[error] {failure}", err=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import frontmatter
+from yaml import YAMLError
 
 from sbo_ingestion.handlers.claude_ai import Conversation, Message
 
@@ -28,16 +29,19 @@ MAX_CAPTURES = 10_000
 JS_WHITESPACE = "\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 
 
-def discover(root: Path) -> list[Path]:
+def discover(root: Path, failures: list[str] | None = None) -> list[Path]:
     """Scan only the specified capture root's platform/folder/conversation.md."""
     resolved = root.resolve()
     paths = []
     for platform in PLATFORMS:
         for path in (root / platform).glob("*/conversation.md"):
+            if path.is_symlink() or not path.resolve().is_relative_to(resolved):
+                if failures is None:
+                    raise ValueError("Kura capture escapes its selected root")
+                failures.append(f"{path}: Kura capture escapes its selected root; it was not read")
+                continue
             if not path.is_file():
                 continue
-            if path.is_symlink() or not path.resolve().is_relative_to(resolved):
-                raise ValueError("Kura capture escapes its selected root")
             paths.append(path)
             if len(paths) > MAX_CAPTURES:
                 raise ValueError("Kura input exceeds 10000 captures; select a smaller batch")
@@ -47,7 +51,11 @@ def discover(root: Path) -> list[Path]:
 def parse_export(path: Path):
     if path.is_symlink() or path.stat().st_size > MAX_CAPTURE_BYTES:
         raise ValueError("Kura input must be a regular capture of at most 64 MiB")
-    post = frontmatter.loads(path.read_text(encoding="utf-8-sig"))
+    try:
+        with path.open(encoding="utf-8-sig", newline="") as handle:
+            post = frontmatter.loads(handle.read().replace("\r\n", "\n"))
+    except YAMLError as error:
+        raise ValueError("Invalid Kura frontmatter; repeat or repair this capture") from error
     if str(post.get("schemaVersion")) != "0.2.0" or not str(post.get("capturedBy", "")).startswith("kura/"):
         raise ValueError("Unsupported Kura capture schema or provenance")
     platform = str(post.get("platform", ""))

@@ -110,3 +110,17 @@ def test_reset_receipt_cannot_erase_previous_private_source(tmp_path, tmp_vault_
     history = list((private / '_distill' / 'kura' / 'history').glob('*/*.md'))
     assert len(history) == 1
     assert history[0].read_text(encoding='utf-8') == original
+
+
+def test_malformed_yaml_and_multiple_cli_inputs_continue_healthy_work(tmp_path, tmp_vault_pair):
+    from click.testing import CliRunner
+    from sbo_ingestion.ingest import cli
+    brain, private = tmp_vault_pair
+    bad = capture(tmp_path / 'bad' / 'conversation.md')
+    bad.write_text('---\nid: [unterminated\n---\ntext', encoding='utf-8')
+    good = capture(tmp_path / 'good' / 'conversation.md')
+    result = CliRunner().invoke(cli, [str(bad), str(good), '--brain-root', str(brain), '--private-root', str(private)])
+    assert result.exit_code == 1
+    assert 'Invalid Kura frontmatter' in result.output
+    assert 'wrote 1 conversation pairs' in result.output
+    assert len(list((private / 'chat-history').glob('*/*.md'))) == 1
