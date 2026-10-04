@@ -169,3 +169,19 @@ def test_plan_cursor_moves_past_large_sources_and_reports_invalid_utf8(source):
     raw.write_bytes(b"\xffinvalid")
     result = plan_batch(find_stubs(brain, limit=1), private, source_budget=256)
     assert result["invalid_sources"][0]["reason"] == "invalid_utf8"
+
+
+def test_pending_cursor_uses_identical_order_for_mixed_case_and_sibling_prefixes(source):
+    brain, _, stub, _, _ = source
+    template = frontmatter.load(stub)
+    for relative in ("ChatGPT/a.md", "chatgpt-x/a.md", "chatgpt/A.md", "chatgpt/z.md"):
+        target = brain / "_inbox" / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(frontmatter.dumps(template), encoding="utf-8")
+    expected = sorted(path.relative_to(brain).as_posix() for path in (brain / "_inbox").rglob("*.md"))
+    seen, cursor = [], ""
+    while batch := find_stubs(brain, limit=1, after=cursor):
+        cursor = Path(batch[0]["stub"]).relative_to(brain).as_posix()
+        assert cursor not in seen
+        seen.append(cursor)
+    assert seen == expected

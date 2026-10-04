@@ -46,7 +46,7 @@ def find_stubs(brain_root: Path, *, limit: int = 0, after: str = "") -> list[dic
 
     needle = f"status: {NEEDS_SUMMARY}"
     pending = []
-    for path in sorted(inbox.rglob("*.md")):
+    for path in sorted(inbox.rglob("*.md"), key=lambda item: item.relative_to(brain_root).as_posix()):
         if after and path.relative_to(brain_root).as_posix() <= after:
             continue
         with path.open("r", encoding="utf-8") as handle:
