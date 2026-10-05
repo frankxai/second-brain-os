@@ -53,3 +53,7 @@ MEMORY.md
 
 # Belongs to claude-code-config; would otherwise ship into a public template.
 .claude/hooks/starlight-pet-hook.js
+
+# estate-guard pack — per-machine files, never tracked
+.claude/settings.local.json
+.claude/ci/estate-guard/last-scan.json
