@@ -26,6 +26,7 @@ dev = [
 [project.scripts]
 sbo-ingest = "sbo_ingestion.ingest:cli"
 sbo-distill = "sbo_ingestion.distill:cli"
+sbo-continuity = "sbo_ingestion.continuity:cli"
 
 [build-system]
 requires = ["hatchling"]

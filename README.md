@@ -209,6 +209,7 @@ sbo-ingest tests/fixtures/claude-ai-export-sample.jsonl \
 | [Reflection Engine](docs/reflection-engine.md) | The 9-stage pipeline, REFLECT + VERIFY spec, honest competitor comparison |
 | [Obsidian MCP Setup](docs/obsidian-mcp.md) | Wiring Claude Code/Desktop to your vault + the gotchas that cost hours |
 | [Privacy Model](docs/privacy-model.md) | Threat model + privacy-hardening checklist |
+| [Session Continuity](docs/continuity.md) | Recover what each AI session was doing after a crash; back up and restore the continuity store |
 | [Architecture](docs/architecture.md) | Three edges, two vaults, agent zones |
 | [Composition Guide](docs/composition-guide.md) | Wiring to SIS / Library OS / Chronicle (optional) |
 | [Swarm Curation](docs/swarm-curation.md) | Optional multi-model audit→build→verify pattern for large vaults |
