@@ -91,6 +91,19 @@ def process_request(request: dict, config: dict) -> dict:
         return {**base, "ok": True, "mode": "agent", "paidApiCalls": 0,
                 "vault": config["brain_root"].parent.name,
                 "captureFolder": config["capture_root"].name}
+    if request.get("op") == "search" and set(request) <= {"v", "id", "op", "query", "cursor", "platform"}:
+        if not isinstance(request.get("query"), str):
+            return {**base, "ok": False, "code": "invalid_request"}
+        from sbo_ingestion.archive_search import search
+        try:
+            result = search(config["brain_root"], request["query"],
+                            cursor=request.get("cursor"), platform=request.get("platform"))
+        except ValueError:
+            return {**base, "ok": False, "code": "invalid_request"}
+        reply = {**base, **result}
+        if len(json.dumps(reply, ensure_ascii=False, separators=(",", ":")).encode()) > 4096:
+            return {**base, "ok": False, "code": "response_bound"}
+        return reply
     if (request.get("op") != "process"
             or set(request) != {"v", "id", "op", "path", "sha256"}
             or not isinstance(request.get("sha256"), str)
