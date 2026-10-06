@@ -8,6 +8,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Version
 
 ### Added
 
+- `sbo-continuity`: setup that drafts an SIS continuity trust policy from your own
+  Codex goal records and never activates it without you; a "What was I doing"
+  vault note that opens the Canvas `/continuity` page; checksummed two-vault
+  backup and restore of `~/.starlight/continuity/store`; and `doctor`/`unlock`
+  for an import lock or reclaim mutex left by a crash. See `docs/continuity.md`.
 - Direct ChatGPT export ZIP ingestion, including current numbered
   `conversations-NNN.json` shards in deterministic order without extracting the
   archive.

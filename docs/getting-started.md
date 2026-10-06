@@ -136,6 +136,7 @@ See `docs/privacy-model.md` and `docs/ingestion-guide.md`.
 ## Next steps
 
 - `docs/composition-guide.md` — wiring SBO to your SIS / Library OS / Chronicle installations (optional).
+- `docs/continuity.md` — recovering what each AI session was doing after a crash, and backing up that record (optional, needs SIS).
 - `docs/paid-tier.md` — adding the 8 depth agents (Big 5, 16P, business-map, etc.).
 - `docs/cross-ai-portability.md` — running SBO commands in ChatGPT / Cursor / Codex / Gemini.
 

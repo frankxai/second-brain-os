@@ -10,6 +10,7 @@
 - [[projects]] — active outcomes
 - [[people]] — agent-maintained per-person index
 - [[patterns]] — weekly pattern-detector output
+- [[What was I doing]] — recovered AI sessions after a crash (opens Canvas)
 
 ## Maps of Content
 
