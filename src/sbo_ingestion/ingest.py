@@ -41,6 +41,7 @@ from sbo_ingestion.handlers import chatgpt as chatgpt_handler
 from sbo_ingestion.handlers import claude_ai as claude_ai_handler
 from sbo_ingestion.handlers import memories as memories_handler
 from sbo_ingestion.handlers import kura as kura_handler
+from sbo_ingestion.handlers import codex as codex_handler
 from sbo_ingestion.summarize import Summary, summarize
 
 Mode = Literal["agent", "api", "dry-run"]
@@ -108,7 +109,7 @@ def _detect_format(path: Path) -> str:
     if suffix == ".md" and path.name == "conversation.md":
         return "kura"
     if suffix == ".jsonl":
-        return "claude.ai"
+        return "codex" if codex_handler.is_rollout(path) else "claude.ai"
     if suffix == ".zip":
         if chatgpt_handler.conversation_members(path):
             return "chatgpt"
@@ -250,7 +251,13 @@ def _ingest_file(
         return _ingest_kura_capture(export_path, brain_root=brain_root, private_root=private_root,
                                     api_key=api_key, effective_mode=effective_mode,
                                     brain_indexes=brain_indexes)
-    if fmt == "claude.ai":
+    if fmt == "codex":
+        if memories_path is not None:
+            raise ValueError("Codex intake accepts only its selected session; import memories separately")
+        return _ingest_codex_session(export_path, brain_root=brain_root,
+                                    private_root=private_root, api_key=api_key,
+                                    effective_mode=effective_mode, brain_indexes=brain_indexes)
+    elif fmt == "claude.ai":
         convos = claude_ai_handler.parse_export(export_path)
         selected_members = (export_path.name,)
     elif fmt == "chatgpt":
@@ -336,34 +343,98 @@ def _ingest_kura_capture(export_path: Path, *, brain_root: Path, private_root: P
                          brain_indexes: dict[str, dict[str, Path]] | None = None) -> list[DualWriteResult]:
     """Hash-based incremental capture intake with private revision receipts."""
     convo = next(kura_handler.parse_export(export_path))
+    return _ingest_local_conversation(convo, export_path, namespace="kura",
+                                     brain_root=brain_root, private_root=private_root,
+                                     api_key=api_key, effective_mode=effective_mode,
+                                     brain_indexes=brain_indexes)
+
+
+def _ingest_codex_session(export_path: Path, *, brain_root: Path, private_root: Path,
+                          api_key: str, effective_mode: Mode,
+                          brain_indexes: dict[str, dict[str, Path]] | None = None
+                          ) -> list[DualWriteResult]:
+    """One selected session; preserve source revisions and rebuild its corpus view."""
+    from sbo_ingestion.handlers.claude_ai import Conversation
+    convo = next(codex_handler.parse_export(export_path))
+    indexes = brain_indexes if brain_indexes is not None else {}
+    lock = private_root / "_distill" / "codex" / "intake.lock"
+    if not lock.resolve().is_relative_to(private_root.resolve()):
+        raise ValueError("Codex receipt escapes private root")
+    with audit.exclusive_lock(lock):
+        # Re-read ownership metadata under the platform lock, so another importer
+        # cannot publish an index based on an earlier cached corpus snapshot.
+        indexes["codex"] = index_existing_brain_paths(brain_root=brain_root, platform="codex")
+        results = _ingest_local_conversation(convo, export_path, namespace="codex",
+                                            brain_root=brain_root, private_root=private_root,
+                                            api_key=api_key, effective_mode=effective_mode,
+                                            brain_indexes=indexes)
+        metadata = []
+        for identity in indexes["codex"]:
+            token = sha256(f"codex:{identity}".encode()).hexdigest()
+            receipt = lock.parent / f"{token}.json"
+            if not receipt.resolve().is_relative_to(private_root.resolve()):
+                raise ValueError("Codex index receipt escapes private root")
+            state = json.loads(receipt.read_text(encoding="utf-8")) if receipt.exists() else {}
+            created = state.get("source_created_at", "") if isinstance(state, dict) else ""
+            metadata.append(Conversation(uuid=identity, title=f"Codex session {identity}",
+                                         created_at=created, updated_at="", messages=(),
+                                         platform="codex"))
+        if metadata:
+            write_index(metadata, brain_root=brain_root, platform="codex")
+        return results
+
+
+def _ingest_local_conversation(convo, export_path: Path, *, namespace: str,
+                               brain_root: Path, private_root: Path, api_key: str,
+                               effective_mode: Mode,
+                               brain_indexes: dict[str, dict[str, Path]] | None = None
+                               ) -> list[DualWriteResult]:
+    """Shared incremental receipts for browser captures and local text sessions."""
     token = sha256(f"{convo.platform}:{convo.uuid}".encode()).hexdigest()
-    state_path = private_root / "_distill" / "kura" / f"{token}.json"
+    state_path = private_root / "_distill" / namespace / f"{token}.json"
     if not state_path.resolve().is_relative_to(private_root.resolve()):
-        raise ValueError("Kura receipt escapes private root")
+        raise ValueError(f"{namespace} receipt escapes private root")
     payload = json.dumps({"title": convo.title, "messages": [(m.sender, m.text) for m in convo.messages]},
                          ensure_ascii=False, sort_keys=True)
+    if namespace == "codex":
+        payload += convo.source_sha256
     digest = sha256(payload.encode()).hexdigest()
     with audit.exclusive_lock(state_path.with_suffix(".lock")):
         try:
             state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
         except json.JSONDecodeError as error:
-            raise ValueError("Invalid private Kura receipt; restore it from a private backup before retrying") from error
+            raise ValueError(f"Invalid private {namespace} receipt; restore it before retrying") from error
         if (not isinstance(state, dict) or (state and (
                 not isinstance(state.get("raw_path"), str)
                 or not isinstance(state.get("content_sha256"), str)
                 or type(state.get("refresh_pending")) is not bool))):
-            raise ValueError("Invalid private Kura receipt fields; restore the receipt before retrying")
+            raise ValueError(f"Invalid private {namespace} receipt fields; restore before retrying")
         indexes = brain_indexes if brain_indexes is not None else {}
         if convo.platform not in indexes:
             indexes[convo.platform] = index_existing_brain_paths(brain_root=brain_root, platform=convo.platform)
         existing = indexes[convo.platform]
         raw = private_root / state.get("raw_path", "_missing")
+        if namespace == "codex" and not state and convo.uuid in existing:
+            import frontmatter
+            reference = frontmatter.load(existing[convo.uuid]).get("private_file", "")
+            if reference:
+                raw = private_root / reference
         if not raw.resolve().is_relative_to(private_root.resolve()):
-            raise ValueError("Kura receipt escapes private root")
+            raise ValueError(f"{namespace} receipt escapes private root")
         raw_digest = sha256(raw.read_bytes()).hexdigest() if raw.is_file() else ""
+        if namespace == "codex" and raw.is_file():
+            import frontmatter
+            if frontmatter.load(raw).get("conversation_id") != convo.uuid:
+                raise ValueError("Codex receipt points to another conversation")
         if (state.get("content_sha256") == digest and convo.uuid in existing
                 and raw_digest and state.get("raw_sha256") == raw_digest):
             return []
+        if namespace == "codex" and raw.is_file():
+            history = state_path.parent / "history" / token / f"{raw_digest}.md"
+            if not history.resolve().is_relative_to(private_root.resolve()):
+                raise ValueError("Codex revision history escapes private root")
+            history.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write_text(history, raw.read_text(encoding="utf-8"), root=private_root)
         summary = (summarize(convo, api_key=api_key) if effective_mode == "api" and convo.uuid not in existing else
                    _dry_run_summary(convo) if effective_mode == "dry-run" else _agent_stub_summary(convo))
         result = write_pair(convo, summary, brain_root=brain_root, private_root=private_root,
@@ -371,18 +442,21 @@ def _ingest_kura_capture(export_path: Path, *, brain_root: Path, private_root: P
         if effective_mode == "agent" and not result.brain_preserved:
             _mark_needs_summary(result.brain_path, brain_root=brain_root)
         audit.record_ingest(private_root, conversation_id=convo.uuid, mode=effective_mode,
-                            fmt="kura", raw_path=result.private_path, brain_path=result.brain_path,
+                            fmt=namespace, raw_path=result.private_path, brain_path=result.brain_path,
                             source=export_path.name, brain_preserved=result.brain_preserved,
                             private_root_for_rel=private_root, brain_root_for_rel=brain_root)
         audit.record_import_receipt(private_root, source_name=export_path.name,
-                                    source_size=export_path.stat().st_size, fmt="kura",
+                                    source_size=export_path.stat().st_size, fmt=namespace,
                                     selected_members=(export_path.name,), conversation_count=1,
                                     brain_created=int(not result.brain_preserved),
                                     brain_preserved=int(result.brain_preserved))
-        _atomic_write_text(state_path, json.dumps({"content_sha256": digest,
-                           "raw_sha256": sha256(result.private_path.read_bytes()).hexdigest(),
-                           "raw_path": result.private_path.relative_to(private_root).as_posix(),
-                           "refresh_pending": result.brain_preserved}, indent=2), root=private_root)
+        receipt = {"content_sha256": digest,
+                   "raw_sha256": sha256(result.private_path.read_bytes()).hexdigest(),
+                   "raw_path": result.private_path.relative_to(private_root).as_posix(),
+                   "refresh_pending": result.brain_preserved}
+        if namespace == "codex":
+            receipt["source_created_at"] = convo.created_at
+        _atomic_write_text(state_path, json.dumps(receipt, indent=2), root=private_root)
         return [result]
 
 
