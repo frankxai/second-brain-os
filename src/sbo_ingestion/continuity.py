@@ -26,11 +26,13 @@ import sqlite3
 import sys
 import tempfile
 import webbrowser
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 from typing import Protocol
+from uuid import uuid4
 
 import click
 
@@ -133,12 +135,16 @@ def _sha256_file(path: Path) -> str:
 
 
 def _write_private(path: Path, text: str, *, exclusive: bool) -> None:
+    _write_private_bytes(path, text.encode("utf-8"), exclusive=exclusive)
+
+
+def _write_private_bytes(path: Path, data: bytes, *, exclusive: bool) -> None:
     """Write via a sibling temp file so a crash never leaves half a policy."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(text)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(tmp, 0o600)
@@ -404,11 +410,13 @@ def approve_draft(paths: Paths, terminal: Terminal) -> dict:
     """Activate the draft after the owner reviews each work at an interactive terminal."""
     if not terminal.interactive:
         raise ContinuityError(
-            "Approving a trust policy needs you at an interactive terminal; agents and scripts cannot approve it."
+            "Approving a trust policy needs you at an interactive terminal; "
+            "agents and scripts cannot approve it."
         )
     if paths.policy.exists():
         raise ContinuityError(
-            f"A trust policy is already active at {paths.policy}. Edit it by hand, or move it aside first."
+            f"A trust policy is already active at {paths.policy}. "
+            "Edit it by hand, or move it aside first."
         )
     try:
         draft = json.loads(paths.draft.read_text("utf-8"))
@@ -429,7 +437,8 @@ def approve_draft(paths: Paths, terminal: Terminal) -> dict:
         checkout = work.get("checkout")
         where = f" on {checkout['origin']} {checkout['branch']}" if checkout else ""
         answer = terminal.ask(
-            f"Trust {work['workId']} (project {work['projectId']}, owner {work['ownerActorId']}){where}? [y/N] "
+            f"Trust {work['workId']} (project {work['projectId']}, "
+            f"owner {work['ownerActorId']}){where}? [y/N] "
         )
         if answer.strip().lower() in ("y", "yes"):
             kept.append(work)
@@ -456,12 +465,22 @@ def _pid_alive(pid: int) -> bool:
     if os.name == "nt":
         # os.kill(pid, 0) on Windows sends CTRL_C_EVENT, so ask the kernel instead.
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        # HANDLE is pointer-sized even on Windows, where C long stays 32-bit.
+        kernel32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+        kernel32.GetExitCodeProcess.restype = ctypes.c_int
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        kernel32.CloseHandle.restype = ctypes.c_int
         handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
         if not handle:
-            return ctypes.get_last_error() == 5  # access denied: it exists
+            # Only INVALID_PARAMETER proves the positive PID does not exist.
+            # Permission and other query failures cannot authorize lock removal.
+            return ctypes.get_last_error() != 87
         try:
             code = ctypes.c_ulong()
-            kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True
             return code.value == 259  # STILL_ACTIVE
         finally:
             kernel32.CloseHandle(handle)
@@ -484,19 +503,28 @@ class LockState:
         name = self.path.name
         if self.kind == "running":
             return f"{name}: an import is running (pid {self.owner['pid']}). Wait for it to finish."
+        if self.owner and self.owner.get("operation") == "restore":
+            return (
+                f"{name}: a restore was interrupted; inspect the active store and "
+                f"the recovery folder {self.owner.get('recovery')} before repairing it. "
+                "Unlock cannot clear an unfinished restore."
+            )
         if self.path.name == MUTEX_NAME:
             return (
-                f"{name}: a crashed lock reclaim left this behind, and SIS stops imports until it is gone. "
+                f"{name}: a crashed lock reclaim left this behind, "
+                "and SIS stops imports until it is gone. "
                 "Run sbo-continuity unlock after confirming no import is running."
             )
         if self.kind == "crashed":
             return (
-                f"{name}: the import that held it has exited. The next import reclaims it on its own; "
+                f"{name}: the import that held it has exited. "
+                "The next import reclaims it on its own; "
                 "sbo-continuity unlock also clears it."
             )
         if self.kind == "other-host":
             return (
-                f"{name}: held by host {self.owner['host']}. Check that machine has no import running, "
+                f"{name}: held by host {self.owner['host']}. "
+                "Check that machine has no import running, "
                 "then run sbo-continuity unlock."
             )
         return f"{name}: unreadable. Confirm no import is running, then run sbo-continuity unlock."
@@ -538,6 +566,9 @@ def unlock(paths: Paths, terminal: Terminal) -> list[Path]:
     running = [s for s in states if s.kind == "running"]
     if running:
         raise ContinuityError(running[0].advice())
+    interrupted = [s for s in states if s.owner and s.owner.get("operation") == "restore"]
+    if interrupted:
+        raise ContinuityError(interrupted[0].advice())
     if not terminal.interactive:
         raise ContinuityError("Clearing a lock needs you at an interactive terminal.")
     for state in states:
@@ -599,7 +630,8 @@ def backup(paths: Paths, destination: Path | None = None) -> Path:
     brain = _vault("SBO_BRAIN_VAULT_ROOT")
     if brain is not None and _is_within(brain, destination):
         raise ContinuityError(
-            "Backups hold private IDs and paths; the brain vault is readable over MCP. Use private/."
+            "Backups hold private IDs and paths; "
+            "the brain vault is readable over MCP. Use private/."
         )
     if _is_within(paths.home, destination):
         raise ContinuityError(
@@ -668,7 +700,8 @@ def verify_backup(source: Path) -> dict:
         ) from error
     files = manifest.get("files") if isinstance(manifest, dict) else None
     if (
-        manifest.get("schemaVersion") != BACKUP_SCHEMA
+        not isinstance(manifest, dict)
+        or manifest.get("schemaVersion") != BACKUP_SCHEMA
         or manifest.get("complete") is not True
         or not isinstance(files, dict)
     ):
@@ -676,10 +709,27 @@ def verify_backup(source: Path) -> dict:
     root = source.resolve()
     for relative, entry in files.items():
         parts = relative.split("/")
-        if len(parts) != 2 or parts[0] not in ("store", POLICY_DIR) or parts[1] in ("", ".", ".."):
+        if (
+            len(parts) != 2
+            or parts[0] not in ("store", POLICY_DIR)
+            or parts[1] in ("", ".", "..", LOCK_NAME, MUTEX_NAME)
+            or parts[1].casefold() in (LOCK_NAME, MUTEX_NAME)
+            or any(char in parts[1] for char in "\\:")
+            or any(ord(char) < 32 for char in parts[1])
+            or parts[1].endswith((" ", "."))
+            or (parts[0] == POLICY_DIR and parts[1] != "trust-policy.json")
+        ):
             raise ContinuityError(f"The backup manifest names an unexpected file: {relative}")
+        if not isinstance(entry, dict):
+            raise ContinuityError(f"The backup manifest has no checksum record for {relative}.")
         path = source / relative
-        if not _is_within(root, path) or not path.is_file():
+        if (
+            not _is_within(root, path)
+            or path.resolve().parent != (root / parts[0]).resolve()
+            or path.is_symlink()
+            or (source / parts[0]).is_symlink()
+            or not path.is_file()
+        ):
             raise ContinuityError(f"The backup is missing {relative}.")
         if path.stat().st_size != entry.get("bytes") or _sha256_file(path) != entry.get("sha256"):
             raise ContinuityError(
@@ -688,58 +738,133 @@ def verify_backup(source: Path) -> dict:
     return manifest
 
 
+@contextmanager
+def _restore_locks(store: Path):
+    """Hold SIS's stable writer path and fence its dead-lock reclaimer after a crash."""
+    _refuse_if_locked(store, "restore")
+    owner = {"pid": os.getpid(), "host": socket.gethostname(), "token": str(uuid4()),
+             "operation": "restore", "recovery": None}
+    acquired = []
+    try:
+        for name in (LOCK_NAME, MUTEX_NAME):
+            path = store / name
+            try:
+                _write_private(path, json.dumps(owner), exclusive=True)
+            except FileExistsError as error:
+                raise ContinuityError(
+                    "Cannot restore while another store writer is locked."
+                ) from error
+            acquired.append(path)
+        yield owner
+    finally:
+        if not owner.get("recoveryRequired"):
+            for path in reversed(acquired):
+                try:
+                    current = json.loads(path.read_text("utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if isinstance(current, dict) and current.get("token") == owner["token"]:
+                    path.unlink()
+
+
+def _assert_restore_locks(store: Path, owner: dict) -> None:
+    for name in (LOCK_NAME, MUTEX_NAME):
+        try:
+            current = json.loads((store / name).read_text("utf-8"))
+        except (OSError, ValueError) as error:
+            raise ContinuityError(
+                "Restore lost its store lock; inspect before retrying."
+            ) from error
+        if not isinstance(current, dict) or current.get("token") != owner["token"]:
+            raise ContinuityError("Restore lost its store lock; inspect before retrying.")
+
+
 def restore(paths: Paths, source: Path, *, replace: bool = False) -> dict:
-    """Restore a verified backup. An existing store is moved aside, never deleted."""
+    """Keep the store's lock path stable; preserve its old contents before replacement."""
     manifest = verify_backup(source)
     store_entries = {r: e for r, e in manifest["files"].items() if r.startswith("store/")}
     policy_entry = manifest["files"].get(f"{POLICY_DIR}/trust-policy.json")
+    policy_bytes = None
+    if policy_entry is not None:
+        policy_bytes = (source / POLICY_DIR / "trust-policy.json").read_bytes()
+        if (
+            len(policy_bytes) != policy_entry["bytes"]
+            or sha256(policy_bytes).hexdigest() != policy_entry["sha256"]
+        ):
+            raise ContinuityError("The backed-up policy changed after checksum verification.")
     paths.home.mkdir(parents=True, exist_ok=True)
+    if paths.store.is_symlink():
+        raise ContinuityError("The store is a symbolic link; inspect it before restoring.")
+    paths.store.mkdir(exist_ok=True, mode=0o700)
     moved_aside = None
-    if paths.store.exists():
-        _refuse_if_locked(paths.store, "restore")
-        if any(paths.store.iterdir()):
-            if not replace:
+    with _restore_locks(paths.store) as owner:
+        staging = Path(tempfile.mkdtemp(dir=paths.home, prefix=f".store.restoring-{_stamp()}-"))
+        moved, installed = [], []
+        try:
+            for relative, entry in store_entries.items():
+                target = staging / relative.split("/", 1)[1]
+                shutil.copyfile(source / relative, target)
+                os.chmod(target, 0o600)
+                if _sha256_file(target) != entry["sha256"]:
+                    raise ContinuityError(
+                        f"{relative} changed while it was restored. Run restore again."
+                    )
+            original = _store_files(paths.store)
+            if original and not replace:
                 raise ContinuityError(
-                    f"{paths.store} already holds data. Run restore with --replace to move it aside first."
+                    f"{paths.store} already holds data. Run restore with --replace first."
                 )
-            moved_aside = paths.home / f"store.before-restore-{_stamp()}"
-            os.replace(paths.store, moved_aside)
-        else:
-            paths.store.rmdir()
-
-    staging = paths.home / f".store.restoring-{_stamp()}"
-    staging.mkdir()
-    try:
-        for relative, entry in store_entries.items():
-            target = staging / relative.split("/", 1)[1]
-            shutil.copyfile(source / relative, target)
-            os.chmod(target, 0o600)
-            if _sha256_file(target) != entry["sha256"]:
-                raise ContinuityError(
-                    f"{relative} changed while it was restored. Run restore again."
-                )
-        os.replace(staging, paths.store)
-    except BaseException:
-        shutil.rmtree(staging, ignore_errors=True)
-        if moved_aside is not None and not paths.store.exists():
-            os.replace(moved_aside, paths.store)
-        raise
+            if original:
+                moved_aside = Path(tempfile.mkdtemp(
+                    dir=paths.home, prefix=f"store.before-restore-{_stamp()}-"
+                ))
+            owner["recovery"] = str(moved_aside) if moved_aside else None
+            _assert_restore_locks(paths.store, owner)
+            _write_private(paths.store / MUTEX_NAME, json.dumps(owner), exclusive=False)
+            for entry in original:
+                _assert_restore_locks(paths.store, owner)
+                # Record the intent before a signal can interrupt a completed rename.
+                moved.append(entry.name)
+                os.replace(entry, moved_aside / entry.name)
+            for entry in list(staging.iterdir()):
+                _assert_restore_locks(paths.store, owner)
+                installed.append(entry.name)
+                os.replace(entry, paths.store / entry.name)
+        except BaseException:
+            if moved or installed:
+                try:
+                    _assert_restore_locks(paths.store, owner)
+                    for name in reversed(installed):
+                        if not (staging / name).exists():
+                            os.replace(paths.store / name, staging / name)
+                    for name in reversed(moved):
+                        if (moved_aside / name).exists():
+                            os.replace(moved_aside / name, paths.store / name)
+                except BaseException as rollback_error:
+                    owner["recoveryRequired"] = True
+                    raise ContinuityError(
+                        "Restore rollback failed; store locks and recovery files are preserved. "
+                        f"Inspect {paths.store}, {moved_aside} and {staging}."
+                    ) from rollback_error
+            raise
+        finally:
+            if not owner.get("recoveryRequired"):
+                shutil.rmtree(staging, ignore_errors=True)
 
     policy_result = None
     if policy_entry is not None:
-        backed_up = source / POLICY_DIR / "trust-policy.json"
-        if not paths.policy.exists():
-            shutil.copyfile(backed_up, paths.policy)
-            os.chmod(paths.policy, 0o600)
-            policy_result = "restored"
-        elif _sha256_file(paths.policy) == policy_entry["sha256"]:
-            policy_result = "unchanged"
+        try:
+            _write_private_bytes(paths.policy, policy_bytes, exclusive=True)
+        except FileExistsError:
+            if _sha256_file(paths.policy) == policy_entry["sha256"]:
+                policy_result = "unchanged"
+            else:
+                # Preserve a policy activated while this restore was in flight.
+                side = paths.home / "trust-policy.restored.json"
+                _write_private_bytes(side, policy_bytes, exclusive=False)
+                policy_result = f"kept the active policy; the backed-up one is at {side}"
         else:
-            # The policy is the trust boundary; a restore never swaps it silently.
-            side = paths.home / "trust-policy.restored.json"
-            shutil.copyfile(backed_up, side)
-            os.chmod(side, 0o600)
-            policy_result = f"kept the active policy; the backed-up one is at {side}"
+            policy_result = "restored"
     return {"files": len(store_entries), "movedAside": moved_aside, "policy": policy_result}
 
 
