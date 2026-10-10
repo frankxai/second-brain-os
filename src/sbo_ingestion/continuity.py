@@ -404,11 +404,13 @@ def approve_draft(paths: Paths, terminal: Terminal) -> dict:
     """Activate the draft after the owner reviews each work at an interactive terminal."""
     if not terminal.interactive:
         raise ContinuityError(
-            "Approving a trust policy needs you at an interactive terminal; agents and scripts cannot approve it."
+            "Approving a trust policy needs you at an interactive terminal; "
+            "agents and scripts cannot approve it."
         )
     if paths.policy.exists():
         raise ContinuityError(
-            f"A trust policy is already active at {paths.policy}. Edit it by hand, or move it aside first."
+            f"A trust policy is already active at {paths.policy}. "
+            "Edit it by hand, or move it aside first."
         )
     try:
         draft = json.loads(paths.draft.read_text("utf-8"))
@@ -429,7 +431,8 @@ def approve_draft(paths: Paths, terminal: Terminal) -> dict:
         checkout = work.get("checkout")
         where = f" on {checkout['origin']} {checkout['branch']}" if checkout else ""
         answer = terminal.ask(
-            f"Trust {work['workId']} (project {work['projectId']}, owner {work['ownerActorId']}){where}? [y/N] "
+            f"Trust {work['workId']} (project {work['projectId']}, "
+            f"owner {work['ownerActorId']}){where}? [y/N] "
         )
         if answer.strip().lower() in ("y", "yes"):
             kept.append(work)
@@ -486,17 +489,20 @@ class LockState:
             return f"{name}: an import is running (pid {self.owner['pid']}). Wait for it to finish."
         if self.path.name == MUTEX_NAME:
             return (
-                f"{name}: a crashed lock reclaim left this behind, and SIS stops imports until it is gone. "
+                f"{name}: a crashed lock reclaim left this behind, "
+                "and SIS stops imports until it is gone. "
                 "Run sbo-continuity unlock after confirming no import is running."
             )
         if self.kind == "crashed":
             return (
-                f"{name}: the import that held it has exited. The next import reclaims it on its own; "
+                f"{name}: the import that held it has exited. "
+                "The next import reclaims it on its own; "
                 "sbo-continuity unlock also clears it."
             )
         if self.kind == "other-host":
             return (
-                f"{name}: held by host {self.owner['host']}. Check that machine has no import running, "
+                f"{name}: held by host {self.owner['host']}. "
+                "Check that machine has no import running, "
                 "then run sbo-continuity unlock."
             )
         return f"{name}: unreadable. Confirm no import is running, then run sbo-continuity unlock."
@@ -599,7 +605,8 @@ def backup(paths: Paths, destination: Path | None = None) -> Path:
     brain = _vault("SBO_BRAIN_VAULT_ROOT")
     if brain is not None and _is_within(brain, destination):
         raise ContinuityError(
-            "Backups hold private IDs and paths; the brain vault is readable over MCP. Use private/."
+            "Backups hold private IDs and paths; "
+            "the brain vault is readable over MCP. Use private/."
         )
     if _is_within(paths.home, destination):
         raise ContinuityError(
@@ -668,7 +675,8 @@ def verify_backup(source: Path) -> dict:
         ) from error
     files = manifest.get("files") if isinstance(manifest, dict) else None
     if (
-        manifest.get("schemaVersion") != BACKUP_SCHEMA
+        not isinstance(manifest, dict)
+        or manifest.get("schemaVersion") != BACKUP_SCHEMA
         or manifest.get("complete") is not True
         or not isinstance(files, dict)
     ):
@@ -676,10 +684,27 @@ def verify_backup(source: Path) -> dict:
     root = source.resolve()
     for relative, entry in files.items():
         parts = relative.split("/")
-        if len(parts) != 2 or parts[0] not in ("store", POLICY_DIR) or parts[1] in ("", ".", ".."):
+        if (
+            len(parts) != 2
+            or parts[0] not in ("store", POLICY_DIR)
+            or parts[1] in ("", ".", "..", LOCK_NAME, MUTEX_NAME)
+            or parts[1].casefold() in (LOCK_NAME, MUTEX_NAME)
+            or any(char in parts[1] for char in "\\:")
+            or any(ord(char) < 32 for char in parts[1])
+            or parts[1].endswith((" ", "."))
+            or (parts[0] == POLICY_DIR and parts[1] != "trust-policy.json")
+        ):
             raise ContinuityError(f"The backup manifest names an unexpected file: {relative}")
+        if not isinstance(entry, dict):
+            raise ContinuityError(f"The backup manifest has no checksum record for {relative}.")
         path = source / relative
-        if not _is_within(root, path) or not path.is_file():
+        if (
+            not _is_within(root, path)
+            or path.resolve().parent != (root / parts[0]).resolve()
+            or path.is_symlink()
+            or (source / parts[0]).is_symlink()
+            or not path.is_file()
+        ):
             raise ContinuityError(f"The backup is missing {relative}.")
         if path.stat().st_size != entry.get("bytes") or _sha256_file(path) != entry.get("sha256"):
             raise ContinuityError(
@@ -697,19 +722,21 @@ def restore(paths: Paths, source: Path, *, replace: bool = False) -> dict:
     moved_aside = None
     if paths.store.exists():
         _refuse_if_locked(paths.store, "restore")
-        if any(paths.store.iterdir()):
-            if not replace:
-                raise ContinuityError(
-                    f"{paths.store} already holds data. Run restore with --replace to move it aside first."
-                )
-            moved_aside = paths.home / f"store.before-restore-{_stamp()}"
-            os.replace(paths.store, moved_aside)
-        else:
-            paths.store.rmdir()
+        if any(paths.store.iterdir()) and not replace:
+            raise ContinuityError(
+                f"{paths.store} already holds data. "
+                "Run restore with --replace to move it aside first."
+            )
 
-    staging = paths.home / f".store.restoring-{_stamp()}"
-    staging.mkdir()
+    # Allocate before moving live data. Each restore gets a unique staging path,
+    # so an interrupted operation and its original store remain recoverable.
+    staging = Path(tempfile.mkdtemp(dir=paths.home, prefix=f".store.restoring-{_stamp()}-"))
     try:
+        if paths.store.exists():
+            moved_aside = paths.home / staging.name.replace(
+                ".store.restoring-", "store.before-restore-", 1
+            )
+            os.replace(paths.store, moved_aside)
         for relative, entry in store_entries.items():
             target = staging / relative.split("/", 1)[1]
             shutil.copyfile(source / relative, target)
