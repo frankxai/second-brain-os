@@ -98,12 +98,8 @@ lexical cache note {index}
     assert second["searched"]["milliseconds"] <= first["searched"]["milliseconds"] + 50
 
 
-def test_hostile_source_and_symlink_do_not_escape(tmp_path: Path) -> None:
+def test_hostile_source_does_not_escape(tmp_path: Path) -> None:
     brain = tmp_path / "brain"
-    outside = tmp_path / "outside.md"
-    outside.write_text("outside archive decision", encoding="utf-8")
-    (brain / "notes").mkdir(parents=True)
-    (brain / "notes" / "escape.md").symlink_to(outside)
     note(brain / "notes" / "bad-link.md", """---
 title: Bad link
 status: reviewed
@@ -115,6 +111,21 @@ archive decision with a rejected link
     result = search(brain, "archive decision")
     assert [item["citation"] for item in result["items"]] == ["notes/bad-link.md"]
     assert result["items"][0]["sourceUrl"] is None
+
+
+def test_symlink_does_not_escape(tmp_path: Path) -> None:
+    brain = tmp_path / "brain"
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside archive decision", encoding="utf-8")
+    (brain / "notes").mkdir(parents=True)
+    try:
+        (brain / "notes" / "escape.md").symlink_to(outside)
+    except OSError as error:
+        if getattr(error, "winerror", None) == 1314:
+            pytest.skip("Windows host lacks symlink creation privilege")
+        raise
+    result = search(brain, "archive decision")
+    assert result["items"] == []
 
 
 def test_native_search_stays_inside_the_metadata_budget(tmp_path: Path) -> None:
@@ -146,3 +157,30 @@ def test_native_search_rejects_private_scope(tmp_path: Path) -> None:
             root.mkdir()
     reply = process_request({"v": 1, "id": "search-2", "op": "search", "query": "x", "scope": "private"}, config)
     assert reply["ok"] is False and reply["code"] == "invalid_request"
+
+
+def test_cursor_refuses_changed_content_with_unchanged_paths_and_scores(tmp_path: Path) -> None:
+    brain = tmp_path / "brain"
+    for label in ("a", "b", "c", "d"):
+        note(brain / f"{label}.md", f"""---
+title: Shared {label}
+status: reviewed
+source: codex
+---
+Shared stable firstword.
+""")
+    first = search(brain, "shared")
+    assert first["cursor"]
+    unchanged = search(brain, "shared", cursor=first["cursor"])
+    assert unchanged["ok"] and len(unchanged["items"]) == 1
+
+    target = brain / "d.md"
+    original = target.read_text(encoding="utf-8")
+    note(target, original.replace("firstword", "otherword"))
+    changed = search(brain, "shared", cursor=first["cursor"])
+    assert changed["ok"] is False and changed["code"] == "index_changed"
+
+    fresh = search(brain, "shared")
+    assert fresh["searched"]["generation"] != first["searched"]["generation"]
+    resumed = search(brain, "shared", cursor=fresh["cursor"])
+    assert resumed["ok"] and len(resumed["items"]) == 1

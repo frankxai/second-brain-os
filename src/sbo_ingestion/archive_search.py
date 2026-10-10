@@ -122,7 +122,9 @@ def load_index(brain_root: Path) -> tuple[dict, dict]:
     temporary = cache_path.with_suffix(".tmp")
     temporary.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
     temporary.replace(cache_path)
-    generation = hashlib.sha256("".join(sorted(records)).encode()).hexdigest()[:16]
+    generation = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:16]
     return records, {
         "root": "brain",
         "changed": changed,
