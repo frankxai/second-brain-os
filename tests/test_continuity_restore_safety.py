@@ -283,3 +283,26 @@ def test_restore_cannot_remove_another_reclaimers_mutex(tmp_path):
     assert mutex.read_bytes() == record
     assert (paths.store / "events.jsonl").read_bytes() == b"original fixture\n"
     assert not (paths.store / c.LOCK_NAME).exists()
+
+
+@pytest.mark.parametrize("phase", ["preserve", "install"])
+def test_interrupt_immediately_after_rename_rolls_back(tmp_path, monkeypatch, phase):
+    paths, backup = backup_fixture(tmp_path)
+    replace = c.os.replace
+    interrupted = []
+
+    def interrupt_after_rename(source, target, *args, **kwargs):
+        result = replace(source, target, *args, **kwargs)
+        matches = (phase == "preserve" and Path(target).parent.name.startswith(
+            "store.before-restore-"
+        )) or (phase == "install" and Path(source).parent.name.startswith(".store.restoring-"))
+        if matches and not interrupted:
+            interrupted.append(True)
+            raise KeyboardInterrupt("fixture post-rename interruption")
+        return result
+
+    monkeypatch.setattr(c.os, "replace", interrupt_after_rename)
+    with pytest.raises(KeyboardInterrupt):
+        c.restore(paths, backup, replace=True)
+    assert (paths.store / "events.jsonl").read_bytes() == b"original fixture\n"
+    assert c.store_locks(paths.store) == []

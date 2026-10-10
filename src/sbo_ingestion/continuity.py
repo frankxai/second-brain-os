@@ -823,20 +823,23 @@ def restore(paths: Paths, source: Path, *, replace: bool = False) -> dict:
             _write_private(paths.store / MUTEX_NAME, json.dumps(owner), exclusive=False)
             for entry in original:
                 _assert_restore_locks(paths.store, owner)
-                os.replace(entry, moved_aside / entry.name)
+                # Record the intent before a signal can interrupt a completed rename.
                 moved.append(entry.name)
+                os.replace(entry, moved_aside / entry.name)
             for entry in list(staging.iterdir()):
                 _assert_restore_locks(paths.store, owner)
-                os.replace(entry, paths.store / entry.name)
                 installed.append(entry.name)
+                os.replace(entry, paths.store / entry.name)
         except BaseException:
             if moved or installed:
                 try:
                     _assert_restore_locks(paths.store, owner)
                     for name in reversed(installed):
-                        os.replace(paths.store / name, staging / name)
+                        if not (staging / name).exists():
+                            os.replace(paths.store / name, staging / name)
                     for name in reversed(moved):
-                        os.replace(moved_aside / name, paths.store / name)
+                        if (moved_aside / name).exists():
+                            os.replace(moved_aside / name, paths.store / name)
                 except BaseException as rollback_error:
                     owner["recoveryRequired"] = True
                     raise ContinuityError(
