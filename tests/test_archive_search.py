@@ -100,6 +100,35 @@ lexical cache note {index}
     assert second["searched"]["milliseconds"] <= first["searched"]["milliseconds"] + 50
 
 
+@pytest.mark.parametrize("cache", [
+    [], {"files": None}, {"files": []},
+    {"files": {"note.md": ["broken"]}}, {"files": {"note.md": "broken"}},
+])
+def test_malformed_cache_rebuilds_from_saved_notes(tmp_path: Path, cache: object) -> None:
+    brain = tmp_path / "brain"
+    note(brain / "note.md", """---
+title: Saved continuity
+status: reviewed
+source: grok
+source_url: https://grok.com/c/continuity
+---
+Useful recovered continuity artifact.
+""")
+    cache_path = brain / "_meta" / "kura-archive-index.json"
+    cache_path.parent.mkdir()
+    cache_path.write_text(json.dumps(cache), encoding="utf-8")
+
+    result = search(brain, "continuity")
+    assert result["ok"] is True
+    assert [item["citation"] for item in result["items"]] == ["note.md"]
+    assert result["items"][0]["sourceUrl"] == "https://grok.com/c/continuity"
+    assert result["searched"]["changed"] == 1
+    rebuilt = search(brain, "continuity")
+    assert rebuilt["searched"]["reused"] == 1
+    assert rebuilt["searched"]["changed"] == 0
+    assert rebuilt["items"] == result["items"]
+
+
 def test_hostile_source_does_not_escape(tmp_path: Path) -> None:
     brain = tmp_path / "brain"
     note(brain / "notes" / "bad-link.md", """---

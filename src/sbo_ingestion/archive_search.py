@@ -99,7 +99,10 @@ def load_index(brain_root: Path) -> tuple[dict, dict]:
     cached: dict[str, dict] = {}
     if cache_path.is_file() and not cache_path.is_symlink():
         try:
-            cached = json.loads(cache_path.read_text(encoding="utf-8")).get("files", {})
+            payload = json.loads(cache_path.read_text(encoding="utf-8"))
+            files = payload.get("files") if isinstance(payload, dict) else None
+            if isinstance(files, dict):
+                cached = files
         except (OSError, UnicodeError, json.JSONDecodeError):
             cached = {}
     records: dict[str, dict] = {}
@@ -114,7 +117,7 @@ def load_index(brain_root: Path) -> tuple[dict, dict]:
         except OSError:
             continue
         previous = cached.get(relative)
-        if (previous and previous.get("size") == stat.st_size
+        if (isinstance(previous, dict) and previous.get("size") == stat.st_size
                 and previous.get("mtime_ns") == stat.st_mtime_ns):
             records[relative] = previous
             reused += 1
