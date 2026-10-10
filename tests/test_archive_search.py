@@ -67,7 +67,9 @@ bounded retrieval item {index}
     first = search(brain, "bounded retrieval")
     second = search(brain, "bounded retrieval", cursor=first["cursor"])
     assert first["cursor"]
-    assert {item["citation"] for item in first["items"]}.isdisjoint(item["citation"] for item in second["items"])
+    assert {item["citation"] for item in first["items"]}.isdisjoint(
+        item["citation"] for item in second["items"]
+    )
     note(brain / "notes" / "new.md", """---
 title: New bounded retrieval
 status: reviewed
@@ -143,7 +145,9 @@ native cited archive search result
 """)
     config = {"version": 1, "extension_id": "a" * 32, "capture_root": capture,
               "brain_root": brain, "private_root": private}
-    reply = process_request({"v": 1, "id": "search-1", "op": "search", "query": "cited archive"}, config)
+    reply = process_request(
+        {"v": 1, "id": "search-1", "op": "search", "query": "cited archive"}, config
+    )
     assert reply["ok"] is True
     assert reply["items"][0]["citation"] == "notes/cited.md"
     assert len(json.dumps(reply, separators=(",", ":")).encode()) <= 4096
@@ -155,7 +159,9 @@ def test_native_search_rejects_private_scope(tmp_path: Path) -> None:
     for root in config.values():
         if isinstance(root, Path):
             root.mkdir()
-    reply = process_request({"v": 1, "id": "search-2", "op": "search", "query": "x", "scope": "private"}, config)
+    reply = process_request(
+        {"v": 1, "id": "search-2", "op": "search", "query": "x", "scope": "private"}, config
+    )
     assert reply["ok"] is False and reply["code"] == "invalid_request"
 
 
@@ -184,3 +190,38 @@ Shared stable firstword.
     assert fresh["searched"]["generation"] != first["searched"]["generation"]
     resumed = search(brain, "shared", cursor=fresh["cursor"])
     assert resumed["ok"] and len(resumed["items"]) == 1
+
+
+@pytest.mark.parametrize("invalid_url", [
+    "https://chatgpt.com:broken/c/one",
+    "https://chatgpt.com:70000/c/one",
+    "https://[bad-host/c/one",
+    "https://chatgpt.com:0/c/one",
+    "https://@chatgpt.com/c/one",
+    "https://:fixture@chatgpt.com/c/one",
+])
+def test_invalid_source_link_does_not_block_valid_note_retrieval(
+    tmp_path: Path, invalid_url: str,
+) -> None:
+    brain = tmp_path / "brain"
+    note(brain / "notes" / "invalid.md", f"""---
+title: Invalid linked archive
+status: reviewed
+source: chatgpt
+source_url: {json.dumps(invalid_url)}
+---
+Recover archive with rejected source link.
+""")
+    note(brain / "notes" / "valid.md", """---
+title: Valid linked archive
+status: reviewed
+source: chatgpt
+source_url: https://chatgpt.com/c/valid
+---
+Recover archive with valid source link.
+""")
+    result = search(brain, "recover archive")
+    assert result["ok"]
+    hits = {item["citation"]: item for item in result["items"]}
+    assert hits["notes/invalid.md"]["sourceUrl"] is None
+    assert hits["notes/valid.md"]["sourceUrl"] == "https://chatgpt.com/c/valid"
