@@ -26,11 +26,13 @@ import sqlite3
 import sys
 import tempfile
 import webbrowser
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 from typing import Protocol
+from uuid import uuid4
 
 import click
 
@@ -501,6 +503,12 @@ class LockState:
         name = self.path.name
         if self.kind == "running":
             return f"{name}: an import is running (pid {self.owner['pid']}). Wait for it to finish."
+        if self.owner and self.owner.get("operation") == "restore":
+            return (
+                f"{name}: a restore was interrupted; inspect the active store and "
+                f"the recovery folder {self.owner.get('recovery')} before repairing it. "
+                "Unlock cannot clear an unfinished restore."
+            )
         if self.path.name == MUTEX_NAME:
             return (
                 f"{name}: a crashed lock reclaim left this behind, "
@@ -558,6 +566,9 @@ def unlock(paths: Paths, terminal: Terminal) -> list[Path]:
     running = [s for s in states if s.kind == "running"]
     if running:
         raise ContinuityError(running[0].advice())
+    interrupted = [s for s in states if s.owner and s.owner.get("operation") == "restore"]
+    if interrupted:
+        raise ContinuityError(interrupted[0].advice())
     if not terminal.interactive:
         raise ContinuityError("Clearing a lock needs you at an interactive terminal.")
     for state in states:
@@ -727,8 +738,49 @@ def verify_backup(source: Path) -> dict:
     return manifest
 
 
+@contextmanager
+def _restore_locks(store: Path):
+    """Hold SIS's stable writer path and fence its dead-lock reclaimer after a crash."""
+    _refuse_if_locked(store, "restore")
+    owner = {"pid": os.getpid(), "host": socket.gethostname(), "token": str(uuid4()),
+             "operation": "restore", "recovery": None}
+    acquired = []
+    try:
+        for name in (LOCK_NAME, MUTEX_NAME):
+            path = store / name
+            try:
+                _write_private(path, json.dumps(owner), exclusive=True)
+            except FileExistsError as error:
+                raise ContinuityError(
+                    "Cannot restore while another store writer is locked."
+                ) from error
+            acquired.append(path)
+        yield owner
+    finally:
+        if not owner.get("recoveryRequired"):
+            for path in reversed(acquired):
+                try:
+                    current = json.loads(path.read_text("utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if isinstance(current, dict) and current.get("token") == owner["token"]:
+                    path.unlink()
+
+
+def _assert_restore_locks(store: Path, owner: dict) -> None:
+    for name in (LOCK_NAME, MUTEX_NAME):
+        try:
+            current = json.loads((store / name).read_text("utf-8"))
+        except (OSError, ValueError) as error:
+            raise ContinuityError(
+                "Restore lost its store lock; inspect before retrying."
+            ) from error
+        if not isinstance(current, dict) or current.get("token") != owner["token"]:
+            raise ContinuityError("Restore lost its store lock; inspect before retrying.")
+
+
 def restore(paths: Paths, source: Path, *, replace: bool = False) -> dict:
-    """Restore a verified backup. An existing store is moved aside, never deleted."""
+    """Keep the store's lock path stable; preserve its old contents before replacement."""
     manifest = verify_backup(source)
     store_entries = {r: e for r, e in manifest["files"].items() if r.startswith("store/")}
     policy_entry = manifest["files"].get(f"{POLICY_DIR}/trust-policy.json")
@@ -741,38 +793,60 @@ def restore(paths: Paths, source: Path, *, replace: bool = False) -> dict:
         ):
             raise ContinuityError("The backed-up policy changed after checksum verification.")
     paths.home.mkdir(parents=True, exist_ok=True)
+    if paths.store.is_symlink():
+        raise ContinuityError("The store is a symbolic link; inspect it before restoring.")
+    paths.store.mkdir(exist_ok=True, mode=0o700)
     moved_aside = None
-    if paths.store.exists():
-        _refuse_if_locked(paths.store, "restore")
-        if any(paths.store.iterdir()) and not replace:
-            raise ContinuityError(
-                f"{paths.store} already holds data. "
-                "Run restore with --replace to move it aside first."
-            )
-
-    # Allocate before moving live data. Each restore gets a unique staging path,
-    # so an interrupted operation and its original store remain recoverable.
-    staging = Path(tempfile.mkdtemp(dir=paths.home, prefix=f".store.restoring-{_stamp()}-"))
-    try:
-        if paths.store.exists():
-            moved_aside = paths.home / staging.name.replace(
-                ".store.restoring-", "store.before-restore-", 1
-            )
-            os.replace(paths.store, moved_aside)
-        for relative, entry in store_entries.items():
-            target = staging / relative.split("/", 1)[1]
-            shutil.copyfile(source / relative, target)
-            os.chmod(target, 0o600)
-            if _sha256_file(target) != entry["sha256"]:
+    with _restore_locks(paths.store) as owner:
+        staging = Path(tempfile.mkdtemp(dir=paths.home, prefix=f".store.restoring-{_stamp()}-"))
+        moved, installed = [], []
+        try:
+            for relative, entry in store_entries.items():
+                target = staging / relative.split("/", 1)[1]
+                shutil.copyfile(source / relative, target)
+                os.chmod(target, 0o600)
+                if _sha256_file(target) != entry["sha256"]:
+                    raise ContinuityError(
+                        f"{relative} changed while it was restored. Run restore again."
+                    )
+            original = _store_files(paths.store)
+            if original and not replace:
                 raise ContinuityError(
-                    f"{relative} changed while it was restored. Run restore again."
+                    f"{paths.store} already holds data. Run restore with --replace first."
                 )
-        os.replace(staging, paths.store)
-    except BaseException:
-        shutil.rmtree(staging, ignore_errors=True)
-        if moved_aside is not None and not paths.store.exists():
-            os.replace(moved_aside, paths.store)
-        raise
+            if original:
+                moved_aside = Path(tempfile.mkdtemp(
+                    dir=paths.home, prefix=f"store.before-restore-{_stamp()}-"
+                ))
+            owner["recovery"] = str(moved_aside) if moved_aside else None
+            _assert_restore_locks(paths.store, owner)
+            _write_private(paths.store / MUTEX_NAME, json.dumps(owner), exclusive=False)
+            for entry in original:
+                _assert_restore_locks(paths.store, owner)
+                os.replace(entry, moved_aside / entry.name)
+                moved.append(entry.name)
+            for entry in list(staging.iterdir()):
+                _assert_restore_locks(paths.store, owner)
+                os.replace(entry, paths.store / entry.name)
+                installed.append(entry.name)
+        except BaseException:
+            if moved or installed:
+                try:
+                    _assert_restore_locks(paths.store, owner)
+                    for name in reversed(installed):
+                        os.replace(paths.store / name, staging / name)
+                    for name in reversed(moved):
+                        os.replace(moved_aside / name, paths.store / name)
+                except BaseException as rollback_error:
+                    owner["recoveryRequired"] = True
+                    raise ContinuityError(
+                        "Restore rollback failed; store locks and recovery files are preserved. "
+                        f"Inspect {paths.store}, {moved_aside} and {staging}."
+                    ) from rollback_error
+            raise
+        finally:
+            if not owner.get("recoveryRequired"):
+                shutil.rmtree(staging, ignore_errors=True)
 
     policy_result = None
     if policy_entry is not None:

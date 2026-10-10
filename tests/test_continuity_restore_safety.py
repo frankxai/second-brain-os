@@ -2,6 +2,7 @@
 import json
 import os
 from hashlib import sha256
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -174,3 +175,111 @@ def test_malformed_manifest_is_an_actionable_refusal(tmp_path, manifest):
     with pytest.raises(c.ContinuityError):
         c.restore(paths, backup, replace=True)
     assert (paths.store / "events.jsonl").read_bytes() == b"original fixture\n"
+
+
+def test_restore_keeps_store_identity_and_excludes_a_late_sis_writer(tmp_path, monkeypatch):
+    paths, backup = backup_fixture(tmp_path)
+    identity = paths.store.stat().st_ino
+    allocate = c.tempfile.mkdtemp
+    refused = []
+
+    def writer_during_staging(*args, **kwargs):
+        staging = allocate(*args, **kwargs)
+        try:
+            fd = os.open(paths.store / c.LOCK_NAME, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            refused.append(True)
+        else:
+            os.close(fd)
+            raise AssertionError("SIS could acquire its writer lock during restore")
+        return staging
+
+    monkeypatch.setattr(c.tempfile, "mkdtemp", writer_during_staging)
+    result = c.restore(paths, backup, replace=True)
+    assert refused
+    assert paths.store.stat().st_ino == identity
+    assert (result["movedAside"] / "events.jsonl").read_bytes() == b"original fixture\n"
+    assert not (result["movedAside"] / c.LOCK_NAME).exists()
+    assert c.store_locks(paths.store) == []
+
+
+def test_store_populated_during_staging_still_requires_replace(tmp_path, monkeypatch):
+    paths, backup = backup_fixture(tmp_path)
+    (paths.store / "events.jsonl").unlink()
+    allocate = c.tempfile.mkdtemp
+
+    def populate(*args, **kwargs):
+        staging = allocate(*args, **kwargs)
+        (paths.store / "events.jsonl").write_bytes(b"concurrent fixture\n")
+        return staging
+
+    monkeypatch.setattr(c.tempfile, "mkdtemp", populate)
+    with pytest.raises(c.ContinuityError, match="--replace"):
+        c.restore(paths, backup)
+    assert (paths.store / "events.jsonl").read_bytes() == b"concurrent fixture\n"
+    assert c.store_locks(paths.store) == []
+
+
+def test_restore_install_failure_rolls_back_under_the_same_lock(tmp_path, monkeypatch):
+    paths, backup = backup_fixture(tmp_path)
+    replace = c.os.replace
+
+    def fail_install(source, target, *args, **kwargs):
+        if Path(source).parent.name.startswith(".store.restoring-"):
+            assert (paths.store / c.LOCK_NAME).exists()
+            assert (paths.store / c.MUTEX_NAME).exists()
+            raise OSError("fixture install failure")
+        return replace(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(c.os, "replace", fail_install)
+    with pytest.raises(OSError, match="install failure"):
+        c.restore(paths, backup, replace=True)
+    assert (paths.store / "events.jsonl").read_bytes() == b"original fixture\n"
+    assert c.store_locks(paths.store) == []
+
+
+def test_unlock_refuses_an_interrupted_restore_transition(tmp_path, monkeypatch):
+    paths, _ = backup_fixture(tmp_path)
+    owner = {"pid": 1234, "host": c.socket.gethostname(), "token": "restore-fixture",
+             "operation": "restore", "recovery": "store.before-restore-fixture"}
+    for name in [c.LOCK_NAME, c.MUTEX_NAME]:
+        (paths.store / name).write_text(json.dumps(owner))
+    monkeypatch.setattr(c, "_pid_alive", lambda pid: False)
+    terminal = SimpleNamespace(interactive=True, ask=lambda question: "unlock")
+    with pytest.raises(c.ContinuityError, match="restore.*inspect|inspect.*restore"):
+        c.unlock(paths, terminal)
+    assert (paths.store / c.LOCK_NAME).exists()
+    assert (paths.store / c.MUTEX_NAME).exists()
+
+
+def test_failed_rollback_preserves_recovery_files_and_both_fences(tmp_path, monkeypatch):
+    paths, backup = backup_fixture(tmp_path)
+    replace = c.os.replace
+
+    def fail_install_and_rollback(source, target, *args, **kwargs):
+        parent = Path(source).parent.name
+        if parent.startswith((".store.restoring-", "store.before-restore-")):
+            raise OSError("fixture transition failure")
+        return replace(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(c.os, "replace", fail_install_and_rollback)
+    with pytest.raises(c.ContinuityError, match="rollback failed"):
+        c.restore(paths, backup, replace=True)
+    mutex = json.loads((paths.store / c.MUTEX_NAME).read_text())
+    assert (Path(mutex["recovery"]) / "events.jsonl").read_bytes() == b"original fixture\n"
+    assert (paths.store / c.LOCK_NAME).exists()
+    assert paths.policy.read_bytes() == b"active fixture policy\n"
+    assert list(paths.home.glob(".store.restoring-*/events.jsonl"))
+
+
+def test_restore_cannot_remove_another_reclaimers_mutex(tmp_path):
+    paths, backup = backup_fixture(tmp_path)
+    mutex = paths.store / c.MUTEX_NAME
+    record = json.dumps({"pid": os.getpid(), "host": c.socket.gethostname(),
+                         "token": "other-reclaimer"}).encode()
+    mutex.write_bytes(record)
+    with pytest.raises(c.ContinuityError, match="locked"):
+        c.restore(paths, backup, replace=True)
+    assert mutex.read_bytes() == record
+    assert (paths.store / "events.jsonl").read_bytes() == b"original fixture\n"
+    assert not (paths.store / c.LOCK_NAME).exists()
