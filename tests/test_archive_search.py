@@ -194,6 +194,30 @@ def test_native_search_rejects_private_scope(tmp_path: Path) -> None:
     assert reply["ok"] is False and reply["code"] == "invalid_request"
 
 
+def test_native_search_filters_recovered_codex_notes(tmp_path: Path) -> None:
+    brain, private, capture = tmp_path / "brain", tmp_path / "private", tmp_path / "capture"
+    for root in (brain, private, capture):
+        root.mkdir()
+    for platform in ("codex", "chatgpt", "grok"):
+        note(brain / f"{platform}.md", f"""---
+title: Recovered intent from {platform}
+status: reviewed
+source: {platform}
+---
+Recovered intent for the existing owner.
+""")
+    config = {"version": 1, "extension_id": "a" * 32, "capture_root": capture,
+              "brain_root": brain, "private_root": private}
+    reply = process_request(
+        {"v": 1, "id": "codex-filter", "op": "search", "query": "recovered intent",
+         "platform": "codex"}, config,
+    )
+    assert reply["ok"] is True
+    assert [item["citation"] for item in reply["items"]] == ["codex.md"]
+    assert reply["items"][0]["platform"] == "codex"
+    assert reply["items"][0]["excerpt"] == "Recovered intent for the existing owner."
+
+
 def test_cursor_refuses_changed_content_with_unchanged_paths_and_scores(tmp_path: Path) -> None:
     brain = tmp_path / "brain"
     for label in ("a", "b", "c", "d"):

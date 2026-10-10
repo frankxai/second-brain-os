@@ -151,7 +151,7 @@ def search(
     if not isinstance(query, str) or not query.strip() or len(query) > MAX_QUERY:
         raise ValueError("Query must be 1 to 200 characters")
     if platform is not None and platform not in ALLOWED_HOSTS and platform not in {
-            "chatgpt", "claude", "gemini", "grok", "deepseek", "perplexity"}:
+            "chatgpt", "claude", "gemini", "grok", "deepseek", "perplexity", "codex"}:
         raise ValueError("Unsupported platform filter")
     records, measurement = load_index(brain_root)
     terms = tokenize(query)
