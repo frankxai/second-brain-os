@@ -133,12 +133,16 @@ def _sha256_file(path: Path) -> str:
 
 
 def _write_private(path: Path, text: str, *, exclusive: bool) -> None:
+    _write_private_bytes(path, text.encode("utf-8"), exclusive=exclusive)
+
+
+def _write_private_bytes(path: Path, data: bytes, *, exclusive: bool) -> None:
     """Write via a sibling temp file so a crash never leaves half a policy."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(text)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(tmp, 0o600)
@@ -459,12 +463,22 @@ def _pid_alive(pid: int) -> bool:
     if os.name == "nt":
         # os.kill(pid, 0) on Windows sends CTRL_C_EVENT, so ask the kernel instead.
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        # HANDLE is pointer-sized even on Windows, where C long stays 32-bit.
+        kernel32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+        kernel32.GetExitCodeProcess.restype = ctypes.c_int
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        kernel32.CloseHandle.restype = ctypes.c_int
         handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
         if not handle:
-            return ctypes.get_last_error() == 5  # access denied: it exists
+            # Only INVALID_PARAMETER proves the positive PID does not exist.
+            # Permission and other query failures cannot authorize lock removal.
+            return ctypes.get_last_error() != 87
         try:
             code = ctypes.c_ulong()
-            kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True
             return code.value == 259  # STILL_ACTIVE
         finally:
             kernel32.CloseHandle(handle)
@@ -718,6 +732,14 @@ def restore(paths: Paths, source: Path, *, replace: bool = False) -> dict:
     manifest = verify_backup(source)
     store_entries = {r: e for r, e in manifest["files"].items() if r.startswith("store/")}
     policy_entry = manifest["files"].get(f"{POLICY_DIR}/trust-policy.json")
+    policy_bytes = None
+    if policy_entry is not None:
+        policy_bytes = (source / POLICY_DIR / "trust-policy.json").read_bytes()
+        if (
+            len(policy_bytes) != policy_entry["bytes"]
+            or sha256(policy_bytes).hexdigest() != policy_entry["sha256"]
+        ):
+            raise ContinuityError("The backed-up policy changed after checksum verification.")
     paths.home.mkdir(parents=True, exist_ok=True)
     moved_aside = None
     if paths.store.exists():
@@ -754,19 +776,18 @@ def restore(paths: Paths, source: Path, *, replace: bool = False) -> dict:
 
     policy_result = None
     if policy_entry is not None:
-        backed_up = source / POLICY_DIR / "trust-policy.json"
-        if not paths.policy.exists():
-            shutil.copyfile(backed_up, paths.policy)
-            os.chmod(paths.policy, 0o600)
-            policy_result = "restored"
-        elif _sha256_file(paths.policy) == policy_entry["sha256"]:
-            policy_result = "unchanged"
+        try:
+            _write_private_bytes(paths.policy, policy_bytes, exclusive=True)
+        except FileExistsError:
+            if _sha256_file(paths.policy) == policy_entry["sha256"]:
+                policy_result = "unchanged"
+            else:
+                # Preserve a policy activated while this restore was in flight.
+                side = paths.home / "trust-policy.restored.json"
+                _write_private_bytes(side, policy_bytes, exclusive=False)
+                policy_result = f"kept the active policy; the backed-up one is at {side}"
         else:
-            # The policy is the trust boundary; a restore never swaps it silently.
-            side = paths.home / "trust-policy.restored.json"
-            shutil.copyfile(backed_up, side)
-            os.chmod(side, 0o600)
-            policy_result = f"kept the active policy; the backed-up one is at {side}"
+            policy_result = "restored"
     return {"files": len(store_entries), "movedAside": moved_aside, "policy": policy_result}
 
 
