@@ -38,8 +38,12 @@ def tokenize(value: str) -> list[str]:
 def source_url(value: object) -> str | None:
     if not isinstance(value, str) or len(value) > 300:
         return None
-    parsed = urlparse(value)
-    if parsed.scheme != "https" or parsed.username or parsed.port or parsed.hostname not in ALLOWED_HOSTS:
+    try:
+        parsed = urlparse(value)
+        if (parsed.scheme != "https" or parsed.username is not None
+                or parsed.port is not None or parsed.hostname not in ALLOWED_HOSTS):
+            return None
+    except ValueError:
         return None
     return parsed.geturl()
 
@@ -59,7 +63,8 @@ def _record(path: Path, brain: Path) -> dict | None:
     if path.is_symlink() or not path.resolve().is_relative_to(brain):
         return None
     relative = path.relative_to(brain).as_posix()
-    if relative == INDEX_RELATIVE or any(part.startswith(".") for part in path.relative_to(brain).parts):
+    if (relative == INDEX_RELATIVE
+            or any(part.startswith(".") for part in path.relative_to(brain).parts)):
         return None
     try:
         post = frontmatter.load(path)
@@ -94,7 +99,10 @@ def load_index(brain_root: Path) -> tuple[dict, dict]:
     cached: dict[str, dict] = {}
     if cache_path.is_file() and not cache_path.is_symlink():
         try:
-            cached = json.loads(cache_path.read_text(encoding="utf-8")).get("files", {})
+            payload = json.loads(cache_path.read_text(encoding="utf-8"))
+            files = payload.get("files") if isinstance(payload, dict) else None
+            if isinstance(files, dict):
+                cached = files
         except (OSError, UnicodeError, json.JSONDecodeError):
             cached = {}
     records: dict[str, dict] = {}
@@ -109,7 +117,8 @@ def load_index(brain_root: Path) -> tuple[dict, dict]:
         except OSError:
             continue
         previous = cached.get(relative)
-        if previous and previous.get("size") == stat.st_size and previous.get("mtime_ns") == stat.st_mtime_ns:
+        if (isinstance(previous, dict) and previous.get("size") == stat.st_size
+                and previous.get("mtime_ns") == stat.st_mtime_ns):
             records[relative] = previous
             reused += 1
             continue
@@ -122,7 +131,9 @@ def load_index(brain_root: Path) -> tuple[dict, dict]:
     temporary = cache_path.with_suffix(".tmp")
     temporary.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
     temporary.replace(cache_path)
-    generation = hashlib.sha256("".join(sorted(records)).encode()).hexdigest()[:16]
+    generation = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:16]
     return records, {
         "root": "brain",
         "changed": changed,
@@ -133,11 +144,14 @@ def load_index(brain_root: Path) -> tuple[dict, dict]:
     }
 
 
-def search(brain_root: Path, query: str, *, cursor: str | None = None, platform: str | None = None) -> dict:
+def search(
+    brain_root: Path, query: str, *, cursor: str | None = None,
+    platform: str | None = None,
+) -> dict:
     if not isinstance(query, str) or not query.strip() or len(query) > MAX_QUERY:
         raise ValueError("Query must be 1 to 200 characters")
     if platform is not None and platform not in ALLOWED_HOSTS and platform not in {
-            "chatgpt", "claude", "gemini", "grok", "deepseek", "perplexity"}:
+            "chatgpt", "claude", "gemini", "grok", "deepseek", "perplexity", "codex"}:
         raise ValueError("Unsupported platform filter")
     records, measurement = load_index(brain_root)
     terms = tokenize(query)
@@ -161,7 +175,9 @@ def search(brain_root: Path, query: str, *, cursor: str | None = None, platform:
             if not frequency:
                 continue
             documents = max(1, len(docs))
-            idf = math.log(1 + (documents - counts.get(term, 0) + 0.5) / (counts.get(term, 0) + 0.5))
+            idf = math.log(
+                1 + (documents - counts.get(term, 0) + 0.5) / (counts.get(term, 0) + 0.5)
+            )
             length = len(item.get("terms") or [])
             score += idf * (frequency * 2.2) / (frequency + 1.2 * (0.25 + 0.75 * length / average))
         if score:
