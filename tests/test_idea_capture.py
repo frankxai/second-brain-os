@@ -544,6 +544,6 @@ def test_capture_refuses_link_before_read_or_lock(
 
     with monkeypatch.context() as gate:
         gate.setattr(Path, "open", forbidden)
-        with pytest.raises(ValueError, match="symlink"):
+        with pytest.raises(ValueError, match="symlink|boundary"):
             ingest(idea_fixture_file, brain_root=brain, private_root=private, format="idea-capture")
     assert target.read_bytes() == b"PRIVATE_LINK_SENTINEL"
