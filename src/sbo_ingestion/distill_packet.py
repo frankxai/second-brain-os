@@ -18,11 +18,25 @@ MAX_RECEIPT_BYTES = 128 * 1024
 def source_for_stub(stub: Path, private_root: Path) -> Path:
     if stub.is_symlink() or stub.stat().st_size > 4 * 1024 * 1024:
         raise ValueError("Stub must be a bounded regular note")
-    reference = frontmatter.load(stub).get("private_file")
+    post = frontmatter.load(stub)
+    reference = post.get("private_file")
     if not isinstance(reference, str):
         raise ValueError("Stub requires a private source reference")
     parts = reference.split("/")
-    if (len(parts) < 3 or parts[0] != "chat-history" or not parts[-1].endswith(".md")
+    captured_json = (
+        len(parts) == 3
+        and parts[:2] == ["chat-history", "idea-capture"]
+        and post.get("source") == "idea-capture"
+        and isinstance(post.get("conversation_id"), str)
+        and re.fullmatch(r"idea-[0-9a-f]{16}", post["conversation_id"]) is not None
+        and re.fullmatch(
+            r"[0-9]{4}-[0-9]{2}-[0-9]{2}-" + re.escape(post["conversation_id"]) + r"\.json",
+            parts[-1],
+        )
+        is not None
+    )
+    if (len(parts) < 3 or parts[0] != "chat-history"
+            or (not parts[-1].endswith(".md") and not captured_json)
             or any(not part or part in {".", ".."} or "\\" in part or ":" in part
                    or any(ord(char) < 32 for char in part) for part in parts)):
         raise ValueError("Invalid private source reference")
