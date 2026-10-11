@@ -77,3 +77,10 @@ Malformed receipt fields and invalid decoded Unicode refuse with controlled erro
 
 
 Saved-packet retries enforce the same 8 MiB bound on raw originals, variants and private receipts before opening them. Capture indexing also bounds each brain Markdown read and refuses symlink paths, duplicate capture identities and malformed notes. This can stop intake when unrelated existing brain notes are malformed or exceed 8 MiB; repair those notes explicitly and retry. Ordinary chat/Kura ingestion keeps its existing behavior. Metadata-only intake preserves source content privately and still requires deliberate distillation before useful semantic recall.
+
+
+## Read and distill a selected capture
+
+The local source-packet reader accepts the original capture JSON when the brain stub is marked `source: idea-capture`, its path is under `chat-history/idea-capture/`, and the filename, validated packet and stub agree on the semantic identity. Generic JSON references remain rejected. UTF-8/BOM bytes and string tags are preserved; source labels and locators remain unverified data.
+
+Use the existing `sbo-distill packet`, `ack` and `complete` workflow with the source hash. Read and acknowledge every issued packet before completion, write a faithful draft synthesis deliberately, and keep human triage open. Acknowledgment proves delivered byte coverage, not comprehension or faithful meaning. Source changes refuse completion. Cited search can then retrieve the draft through the selected brain root without opening the private source. The `idea-capture` platform filter and installed native-consumer acceptance remain separate gaps; do not relabel a capture as a chat provider to bypass them.
