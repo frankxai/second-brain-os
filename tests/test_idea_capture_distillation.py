@@ -65,7 +65,7 @@ def test_capture_acknowledgment_distillation_and_cited_recall(tmp_path):
     )
     result.brain_path.write_text(frontmatter.dumps(post), encoding="utf-8")
     complete_stub(result.brain_path, private, agent="synthetic-test", source_sha256=digest)
-    hits = search(brain, "tidal habitat learning")
+    hits = search(brain, "tidal habitat learning", platform="idea-capture")
     expected = result.brain_path.relative_to(brain).as_posix()
     assert hits["items"][0]["citation"] == expected
     assert hits["items"][0]["status"] == "triage"
