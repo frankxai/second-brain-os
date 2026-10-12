@@ -116,6 +116,15 @@ Starlight Chronicle's weekly Palace Review (`/palace`) is the canonical distilla
 
 See `~/.claude/skills/starlight-chronicle/SKILL.md` for the four-cadence practice (weekly, monthly, quarterly, annual).
 
+## Pattern: Starlight Operator Memory (Clipboard & Prompts)
+
+Clipboard and Second Brain OS are Starlight operator memory. They are not Arcanea canon.
+
+- **Copies:** `C:\Users\frank\.starlight\clipboard-index` (or `~/.starlight/clipboard-index`)
+- **Kept prompts:** `C:\Users\frank\.starlight\prompt-fabric` (or `~/.starlight/prompt-fabric`)
+- **Vault Ingest Policy:** Ingest strictly one atom at a time, and only when explicitly requested. Never bulk-import the clipboard index into the vault.
+- **Isolation Boundary:** Arcanea's free reader and `@arcanea/studio-mcp` must not read or write this vault or operator memory.
+
 ## Pattern: ACOS hook integration
 
 If you use ACOS (Agentic Creator OS) with ReasoningBank trajectory tracking, the pattern-detector agent can read trajectory data:

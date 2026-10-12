@@ -8,6 +8,10 @@
 
 SBO is a vertical that composes SIP. It defines a personal-knowledge architecture (two vaults, dual-write ingestion, agent contracts) — it does not define archetypes, world rules, or domain constants.
 
+### Operator memory vs canon boundary
+
+Clipboard and Second Brain OS are Starlight operator memory. They are not Arcanea canon.
+
 ## Why
 
 Per SIP § Sovereignty clause: substrate declines vertical canon. SBO is itself a vertical from SIP's perspective, but it serves as a substrate for downstream installations. Per the same recursive rule, SBO declines to impose canon on its adopters.

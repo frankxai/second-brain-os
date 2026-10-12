@@ -10,6 +10,10 @@ Your `private/` vault and your `brain/` vault are independent Obsidian vaults at
 
 The ONE bridge is `private/_distill/pending/` → `brain/patterns/`. You move content across this bridge by **manual copy-paste only**. There is no script. There is no automation.
 
+### External tools & Arcanea boundary
+
+Arcanea's free reader and `@arcanea/studio-mcp` must not read or write this vault or Starlight operator memory.
+
 ## What this protects against
 
 - Accidental LLM read of sensitive content via MCP.
@@ -56,9 +60,15 @@ Smart Connections, Text Generator, Copilot for Obsidian — these send vault con
 
 **Fix:** Never install these in the private vault. The setup script enforces this.
 
-### 6. Clipboard history
+### 6. Clipboard history and operator memory
 
 Windows Clipboard History (Win+V), macOS Universal Clipboard, and clipboard managers retain copy-paste contents across sessions. Your private→brain distillation moves leave a trail.
+
+Starlight operator memory locations:
+- Copies: `C:\Users\frank\.starlight\clipboard-index`
+- Kept prompts: `C:\Users\frank\.starlight\prompt-fabric`
+
+**Ingestion Rule:** Ingest into the vault strictly one atom at a time, and only when explicitly requested by the operator. Do not bulk-import the clipboard.
 
 **Fix:** After each private→brain distillation:
 - **Windows:** Win+V → click the three-dot menu → Clear all.
