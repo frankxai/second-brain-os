@@ -5,6 +5,7 @@
 ## Surfaces
 
 - [[_capture]] — one-file append surface
+- [[Continuity.canvas|/continuity]] — one-click "what was I doing" session recovery view
 - [[_inbox]] — imported chats + drops awaiting triage
 - [[notes]] — atomic evergreen notes
 - [[projects]] — active outcomes
@@ -21,6 +22,7 @@
 
 - [[_meta/about|about me]] — bio + current state (paid tier or human-written)
 - [[_meta/psychometrics|psychometrics]] — paid-tier outputs
+- [[_meta/trust-policy|trust policy]] — session continuity approval
 
 ## Weekly ritual
 
