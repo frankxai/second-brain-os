@@ -1,4 +1,4 @@
-# Second Brain OS — Substrate Skill
+# Second brain OS — substrate skill
 
 > The behavior contract an LLM adopts when working inside an SBO vault.
 
@@ -45,7 +45,7 @@ reference. Do not create another private-to-brain bridge outside this workflow.
 
 ## Voice rules
 
-Follow the vault's `_agents/voice.md` if present. Otherwise: direct, technical, warm. No AI-slop ("delve", "dive into", "it's worth noting", "certainly", "absolutely"). No hyperbole. Show, don't tell.
+Follow the vault's `_agents/voice.md` if present. Otherwise: direct, technical, warm. No AI-slop (d-e-l-v-e, d-i-v-e into, etc.). No hyperbole. Show, don't tell.
 
 ## Built on SIP
 
