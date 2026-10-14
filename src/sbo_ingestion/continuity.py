@@ -12,8 +12,8 @@ import frontmatter
 
 def check_sis_installed(custom_path: Path | None = None) -> bool:
     """Check if Starlight Intelligence System (SIS) substrate is available."""
-    if custom_path and custom_path.exists():
-        return True
+    if custom_path is not None:
+        return custom_path.is_dir()
     env_root = os.environ.get("SBO_SIS_ROOT") or os.environ.get("SIS_ROOT")
     if env_root and Path(env_root).exists():
         return True
