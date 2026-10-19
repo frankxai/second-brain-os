@@ -10,6 +10,7 @@ from uuid import uuid4
 import frontmatter
 
 from sbo_ingestion import audit
+from sbo_ingestion.handlers import idea_capture
 
 MAX_SOURCE_BYTES = 64 * 1024 * 1024
 MAX_RECEIPT_BYTES = 128 * 1024
@@ -35,15 +36,38 @@ def source_for_stub(stub: Path, private_root: Path) -> Path:
         )
         is not None
     )
-    if (len(parts) < 3 or parts[0] != "chat-history"
-            or (not parts[-1].endswith(".md") and not captured_json)
-            or any(not part or part in {".", ".."} or "\\" in part or ":" in part
-                   or any(ord(char) < 32 for char in part) for part in parts)):
+    if (
+        len(parts) < 3
+        or parts[0] != "chat-history"
+        or (not parts[-1].endswith(".md") and not captured_json)
+        or any(
+            not part
+            or part in {".", ".."}
+            or "\\" in part
+            or ":" in part
+            or any(ord(char) < 32 for char in part)
+            for part in parts
+        )
+    ):
         raise ValueError("Invalid private source reference")
     source = private_root.joinpath(*parts)
-    if (source.is_symlink() or not source.resolve().is_relative_to(private_root.resolve())
-            or not source.is_file() or source.stat().st_size > MAX_SOURCE_BYTES):
+    if (
+        source.is_symlink()
+        or not source.resolve().is_relative_to(private_root.resolve())
+        or not source.is_file()
+        or source.stat().st_size > MAX_SOURCE_BYTES
+    ):
         raise ValueError("Private source must remain in its selected vault and fit 64 MiB")
+    if captured_json:
+        parent = private_root
+        for part in parts:
+            parent /= part
+            if parent.is_symlink():
+                raise ValueError("Capture source path cannot contain symlinks")
+        packet_data, _ = idea_capture.read_and_validate_packet(source)
+        semantic = idea_capture.compute_semantic_identity(packet_data)
+        if post["conversation_id"] != f"idea-{semantic[:16]}":
+            raise ValueError("Capture source identity does not match its stub")
     return source
 
 
@@ -75,22 +99,43 @@ def _load_receipt(path: Path, digest: str, size: int) -> dict:
         raise ValueError("Source-coverage receipt exceeds its bounded size")
     value = json.loads(path.read_text(encoding="utf-8"))
     intervals = value.get("intervals") if isinstance(value, dict) else None
-    if (not isinstance(value, dict) or value.get("source_sha256") != digest
-            or value.get("source_bytes") != size or not isinstance(intervals, list)
-            or len(intervals) > 4096
-            or any(not isinstance(pair, list) or len(pair) != 2
-                   or any(type(item) is not int for item in pair)
-                   or not 0 <= pair[0] <= pair[1] <= size for pair in intervals)):
+    if (
+        not isinstance(value, dict)
+        or value.get("source_sha256") != digest
+        or value.get("source_bytes") != size
+        or not isinstance(intervals, list)
+        or len(intervals) > 4096
+        or any(
+            not isinstance(pair, list)
+            or len(pair) != 2
+            or any(type(item) is not int for item in pair)
+            or not 0 <= pair[0] <= pair[1] <= size
+            for pair in intervals
+        )
+    ):
         raise ValueError("Invalid or changed source-coverage receipt; restore it before retrying")
     if value.get("version") == 2:
         pending, acknowledged = value.get("pending"), value.get("acknowledged_tokens", [])
-        if (not isinstance(pending, list) or len(pending) > 16
-                or any(not isinstance(item, dict) or set(item) != {"token", "start", "end"}
-                       or not isinstance(item["token"], str) or not re.fullmatch(r"[a-f0-9]{32}", item["token"])
-                       or type(item["start"]) is not int or type(item["end"]) is not int
-                       or not 0 <= item["start"] <= item["end"] <= size for item in pending)
-                or not isinstance(acknowledged, list) or len(acknowledged) > 16
-                or any(not isinstance(token, str) or not re.fullmatch(r"[a-f0-9]{32}", token) for token in acknowledged)):
+        if (
+            not isinstance(pending, list)
+            or len(pending) > 16
+            or any(
+                not isinstance(item, dict)
+                or set(item) != {"token", "start", "end"}
+                or not isinstance(item["token"], str)
+                or not re.fullmatch(r"[a-f0-9]{32}", item["token"])
+                or type(item["start"]) is not int
+                or type(item["end"]) is not int
+                or not 0 <= item["start"] <= item["end"] <= size
+                for item in pending
+            )
+            or not isinstance(acknowledged, list)
+            or len(acknowledged) > 16
+            or any(
+                not isinstance(token, str) or not re.fullmatch(r"[a-f0-9]{32}", token)
+                for token in acknowledged
+            )
+        ):
             raise ValueError("Invalid packet-delivery receipt; reset coverage before retrying")
     return value
 
@@ -116,8 +161,15 @@ def require_packet_hash(stub: Path, private_root: Path, digest: str) -> None:
         raise ValueError("A packet sequence exists; completion requires its source hash")
 
 
-def packet(stub: Path, *, brain_root: Path, private_root: Path,
-           offset: int = 0, max_bytes: int = 6000, expected_sha256: str = "") -> dict:
+def packet(
+    stub: Path,
+    *,
+    brain_root: Path,
+    private_root: Path,
+    offset: int = 0,
+    max_bytes: int = 6000,
+    expected_sha256: str = "",
+) -> dict:
     _, private = _roots(stub, brain_root, private_root)
     if not 256 <= max_bytes <= 32_000 or offset < 0:
         raise ValueError("Packet budget must be 256..32000 bytes and offset non-negative")
@@ -146,13 +198,18 @@ def packet(stub: Path, *, brain_root: Path, private_root: Path,
     # Preserve every byte while avoiding a UTF-8 code point split at the end.
     for trim in range(4):
         try:
-            selected = chunk[:len(chunk) - trim] if trim else chunk
+            selected = chunk[: len(chunk) - trim] if trim else chunk
             text = selected.decode("utf-8")
             break
         except UnicodeDecodeError as error:
-            if (error.reason != "unexpected end of data" or offset + len(chunk) >= size
-                    or error.start < len(chunk) - 4):
-                raise ValueError("Source offset is not a UTF-8 boundary or source is invalid") from error
+            if (
+                error.reason != "unexpected end of data"
+                or offset + len(chunk) >= size
+                or error.start < len(chunk) - 4
+            ):
+                raise ValueError(
+                    "Source offset is not a UTF-8 boundary or source is invalid"
+                ) from error
     else:
         raise ValueError("Source offset is not a UTF-8 boundary or source is invalid")
     end = offset + len(selected)
@@ -165,19 +222,33 @@ def packet(stub: Path, *, brain_root: Path, private_root: Path,
     if not lock.resolve().is_relative_to(private):
         raise ValueError("Source-coverage lock escapes private vault")
     with audit.exclusive_lock(lock):
-        state = (_load_receipt(receipt, digest, size) if receipt.exists()
-                 else {"source_sha256": digest, "source_bytes": size, "intervals": []})
+        state = (
+            _load_receipt(receipt, digest, size)
+            if receipt.exists()
+            else {"source_sha256": digest, "source_bytes": size, "intervals": []}
+        )
         if state.get("version") != 2:
             state["legacy_issued_intervals"] = state["intervals"]
             state.update(version=2, intervals=[], pending=[])
         pending = state.get("pending")
-        if (not isinstance(pending, list) or len(pending) > 16
-                or any(not isinstance(item, dict) or set(item) != {"token", "start", "end"}
-                       or not isinstance(item["token"], str) or not re.fullmatch(r"[a-f0-9]{32}", item["token"])
-                       or type(item["start"]) is not int or type(item["end"]) is not int
-                       or not 0 <= item["start"] <= item["end"] <= size for item in pending)):
+        if (
+            not isinstance(pending, list)
+            or len(pending) > 16
+            or any(
+                not isinstance(item, dict)
+                or set(item) != {"token", "start", "end"}
+                or not isinstance(item["token"], str)
+                or not re.fullmatch(r"[a-f0-9]{32}", item["token"])
+                or type(item["start"]) is not int
+                or type(item["end"]) is not int
+                or not 0 <= item["start"] <= item["end"] <= size
+                for item in pending
+            )
+        ):
             raise ValueError("Invalid packet-delivery receipt; reset coverage before retrying")
-        issued = next((item for item in pending if item["start"] == offset and item["end"] == end), None)
+        issued = next(
+            (item for item in pending if item["start"] == offset and item["end"] == end), None
+        )
         if issued is None:
             if len(pending) >= 16:
                 raise ValueError("Acknowledge received packets before requesting more")
@@ -185,37 +256,58 @@ def packet(stub: Path, *, brain_root: Path, private_root: Path,
             pending.append(issued)
         state["fingerprint"] = fingerprint
         audit.atomic_write_text(receipt, json.dumps(state, separators=(",", ":")) + "\n")
-    return {"trust": "untrusted-data", "source": source.relative_to(private).as_posix(),
-            "source_sha256": digest, "source_bytes": size, "start": offset, "end": end,
-            "next_offset": end if end < size else None, "source_chunk_bytes": len(selected),
-            "approx_source_tokens": (len(selected) + 3) // 4,
-            "coverage_complete": state["intervals"] == [[0, size]],
-            "ack_token": issued["token"], "content": text}
+    return {
+        "trust": "untrusted-data",
+        "source": source.relative_to(private).as_posix(),
+        "source_sha256": digest,
+        "source_bytes": size,
+        "start": offset,
+        "end": end,
+        "next_offset": end if end < size else None,
+        "source_chunk_bytes": len(selected),
+        "approx_source_tokens": (len(selected) + 3) // 4,
+        "coverage_complete": state["intervals"] == [[0, size]],
+        "ack_token": issued["token"],
+        "content": text,
+    }
 
 
-def acknowledge_packet(stub: Path, *, brain_root: Path, private_root: Path,
-                       digest: str, token: str) -> dict:
+def acknowledge_packet(
+    stub: Path, *, brain_root: Path, private_root: Path, digest: str, token: str
+) -> dict:
     _, private = _roots(stub, brain_root, private_root)
     source = source_for_stub(stub, private)
     if not re.fullmatch(r"[a-f0-9]{64}", digest) or not re.fullmatch(r"[a-f0-9]{32}", token):
         raise ValueError("Invalid source hash or packet token")
     receipt = _receipt_path(stub, private, digest)
-    if not receipt.resolve().is_relative_to(private) or not receipt.with_suffix(".lock").resolve().is_relative_to(private):
+    if not receipt.resolve().is_relative_to(private) or not receipt.with_suffix(
+        ".lock"
+    ).resolve().is_relative_to(private):
         raise ValueError("Source-coverage receipt escapes private vault")
     with audit.exclusive_lock(receipt.with_suffix(".lock")):
         state = _load_receipt(receipt, digest, source.stat().st_size)
         if state.get("version") != 2 or state.get("fingerprint") != _fingerprint(source):
             raise ValueError("Source changed; reread before acknowledging")
-        issued = next((item for item in state.get("pending", []) if item.get("token") == token), None)
+        issued = next(
+            (item for item in state.get("pending", []) if item.get("token") == token), None
+        )
         if not issued:
             if token in state.get("acknowledged_tokens", []):
-                return {"source_sha256": digest, "coverage_complete": state["intervals"] == [[0, state["source_bytes"]]]}
+                return {
+                    "source_sha256": digest,
+                    "coverage_complete": state["intervals"] == [[0, state["source_bytes"]]],
+                }
             raise ValueError("Packet token was not issued for this source")
-        state["intervals"] = _merge_intervals(state["intervals"] + [[issued["start"], issued["end"]]])
+        state["intervals"] = _merge_intervals(
+            state["intervals"] + [[issued["start"], issued["end"]]]
+        )
         state["pending"] = [item for item in state["pending"] if item["token"] != token]
         state["acknowledged_tokens"] = (state.get("acknowledged_tokens", []) + [token])[-16:]
         audit.atomic_write_text(receipt, json.dumps(state, separators=(",", ":")) + "\n")
-    return {"source_sha256": digest, "coverage_complete": state["intervals"] == [[0, state["source_bytes"]]]}
+    return {
+        "source_sha256": digest,
+        "coverage_complete": state["intervals"] == [[0, state["source_bytes"]]],
+    }
 
 
 def reset_coverage(stub: Path, private_root: Path, digest: str) -> None:
@@ -226,7 +318,10 @@ def reset_coverage(stub: Path, private_root: Path, digest: str) -> None:
     # The receipt body retains the full digest; keep its recovery filename within
     # the original target path budget on Windows. The UUID distinguishes resets.
     target = receipt.with_name(f"{digest[:8]}.recovery-{uuid4().hex}.json")
-    if any(not path.resolve().is_relative_to(private_root.resolve()) for path in (receipt, target, receipt.with_suffix(".lock"))):
+    if any(
+        not path.resolve().is_relative_to(private_root.resolve())
+        for path in (receipt, target, receipt.with_suffix(".lock"))
+    ):
         raise ValueError("Source-coverage receipt escapes private vault")
     with audit.exclusive_lock(receipt.with_suffix(".lock")):
         if receipt.exists():
@@ -241,7 +336,9 @@ def require_complete_coverage(stub: Path, private_root: Path, digest: str) -> No
     if not receipt.resolve().is_relative_to(private_root.resolve()):
         raise ValueError("Source-coverage receipt escapes private vault")
     state = _load_receipt(receipt, digest, source.stat().st_size)
-    if state.get("version") != 2 or _merge_intervals(state["intervals"]) != [[0, source.stat().st_size]]:
+    if state.get("version") != 2 or _merge_intervals(state["intervals"]) != [
+        [0, source.stat().st_size]
+    ]:
         raise ValueError("Source coverage is incomplete; read its remaining packets")
 
 

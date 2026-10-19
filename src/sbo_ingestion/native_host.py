@@ -91,8 +91,7 @@ def process_request(request: dict, config: dict) -> dict:
         return {**base, "ok": True, "mode": "agent", "paidApiCalls": 0,
                 "vault": config["brain_root"].parent.name,
                 "captureFolder": config["capture_root"].name}
-    if (request.get("op") == "search"
-            and set(request) <= {"v", "id", "op", "query", "cursor", "platform"}):
+    if request.get("op") == "search" and set(request) <= {"v", "id", "op", "query", "cursor", "platform"}:
         if not isinstance(request.get("query"), str):
             return {**base, "ok": False, "code": "invalid_request"}
         from sbo_ingestion.archive_search import search
