@@ -1,6 +1,6 @@
 """Append-only audit log at private/_distill/audit.jsonl.
 
-Records every ingest + distill event. Lives inside the private/ vault — never
+Records every ingest + distill event. Lives inside the private/ vault â€” never
 touched by MCP, never published. Use this to verify what came in and what got
 summarized, by which agent, when. The log is append-only by convention; do not
 rewrite past entries.
@@ -70,7 +70,8 @@ def exclusive_lock(path: Path):
 
 def atomic_write_text(path: Path, text: str) -> None:
     """Flush a complete replacement before touching the original file."""
-    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    # Keep same-directory atomic replacement without extending a valid target path.
+    temporary = path.with_name(f".sbo-{uuid4().hex}.tmp")
     mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600
     try:
         with temporary.open("x", encoding="utf-8", newline="") as handle:

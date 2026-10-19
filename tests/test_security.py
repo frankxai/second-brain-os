@@ -88,9 +88,7 @@ def test_uuid_cannot_create_ntfs_alternate_data_stream(
 ) -> None:
     """`x:evil` would write a hidden ADS on NTFS — invisible to Obsidian and to the user."""
     brain, private = tmp_vault_pair
-    result = write_pair(
-        _convo(uuid="x:evil"), _summary(), brain_root=brain, private_root=private
-    )
+    result = write_pair(_convo(uuid="x:evil"), _summary(), brain_root=brain, private_root=private)
     assert ":" not in result.private_path.name
     assert result.private_path.name.endswith(".md")
 
@@ -133,9 +131,7 @@ def test_brain_body_does_not_smuggle_a_multiline_title(
 ) -> None:
     """A newline-bearing title was emitted verbatim as free markdown in the brain note."""
     brain, private = tmp_vault_pair
-    result = write_pair(
-        _convo(), _summary(INJECTION), brain_root=brain, private_root=private
-    )
+    result = write_pair(_convo(), _summary(INJECTION), brain_root=brain, private_root=private)
     body = frontmatter.load(result.brain_path).content
     heading = next(ln for ln in body.splitlines() if ln.startswith("# "))
     assert "SYSTEM INSTRUCTION" in heading, "payload must stay inside the title line"
@@ -259,14 +255,43 @@ def test_same_day_same_title_conversations_both_survive(tmp_path):
     """Brain stubs must not silently overwrite each other on a title collision."""
     brain, private = tmp_path / "brain", tmp_path / "private"
     convos = [
-        Conversation(uuid=f"id-{n}", title="Untitled", platform="chatgpt",
-                     created_at="2026-05-11T10:00:00+00:00",
-                     updated_at="2026-05-11T10:00:00+00:00", messages=[])
+        Conversation(
+            uuid=f"id-{n}",
+            title="Untitled",
+            platform="chatgpt",
+            created_at="2026-05-11T10:00:00+00:00",
+            updated_at="2026-05-11T10:00:00+00:00",
+            messages=[],
+        )
         for n in range(2)
     ]
     for c in convos:
-        write_pair(c, Summary(title=c.title, tldr="", insights=[], decisions=[],
-                              open_questions=[]), brain_root=brain, private_root=private)
+        write_pair(
+            c,
+            Summary(title=c.title, tldr="", insights=[], decisions=[], open_questions=[]),
+            brain_root=brain,
+            private_root=private,
+        )
 
     stubs = list((brain / "_inbox" / "chatgpt").glob("*.md"))
     assert len(stubs) == 2, f"expected both stubs, got {[p.name for p in stubs]}"
+
+
+def test_starlight_operator_memory_and_arcanea_isolation_policies() -> None:
+    """Verify that SBO docs enforce Starlight operator memory and Arcanea isolation."""
+    repo_root = Path(__file__).parent.parent
+    canon = (repo_root / "CANON.md").read_text(encoding="utf-8")
+    privacy = (repo_root / "docs" / "privacy-model.md").read_text(encoding="utf-8")
+    mcp_policy = (repo_root / "docs" / "mcp-usage-policy.md").read_text(encoding="utf-8")
+    composition = (repo_root / "docs" / "composition-guide.md").read_text(encoding="utf-8")
+
+    assert "Starlight operator memory" in canon
+    assert "not Arcanea canon" in canon
+
+    for doc in (privacy, composition):
+        assert r"C:\Users\frank\.starlight\clipboard-index" in doc
+        assert r"C:\Users\frank\.starlight\prompt-fabric" in doc
+        assert "one atom" in doc.lower()
+
+    for doc in (privacy, mcp_policy, composition):
+        assert "@arcanea/studio-mcp" in doc

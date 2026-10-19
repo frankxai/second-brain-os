@@ -91,6 +91,7 @@ Need content?
 | Secrets / env material | Out of vault |
 | Automatic private→brain promotion | Manual copy-paste only |
 | "Helpful" full reindex per query | MOC → targeted path instead |
+| `@arcanea/studio-mcp` or Arcanea reader access | Vault & operator memory are Starlight-only |
 
 ---
 

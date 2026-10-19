@@ -315,7 +315,9 @@ def reset_coverage(stub: Path, private_root: Path, digest: str) -> None:
     if source_digest(source) != digest:
         raise ValueError("Reset requires the current source hash")
     receipt = _receipt_path(stub, private_root, digest)
-    target = receipt.with_name(f"{digest}.recovery-{uuid4().hex}.json")
+    # The receipt body retains the full digest; keep its recovery filename within
+    # the original target path budget on Windows. The UUID distinguishes resets.
+    target = receipt.with_name(f"{digest[:8]}.recovery-{uuid4().hex}.json")
     if any(
         not path.resolve().is_relative_to(private_root.resolve())
         for path in (receipt, target, receipt.with_suffix(".lock"))

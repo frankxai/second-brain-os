@@ -224,6 +224,8 @@ def _detect_format(path: Path) -> str:
     if suffix == ".json":
         with path.open("r", encoding="utf-8") as f:
             head = f.read(_DETECT_HEAD_CHARS)
+        if '"rawText"' in head and '"version"' in head and '"tags"' in head:
+            return "idea-capture"
         if '"chat_messages"' in head:
             return "claude.ai"
         if '"mapping"' in head:
@@ -384,6 +386,9 @@ def _ingest_file(
         return _ingest_kura_capture(export_path, brain_root=brain_root, private_root=private_root,
                                     api_key=api_key, effective_mode=effective_mode,
                                     brain_indexes=brain_indexes)
+    if fmt == "idea-capture":
+        return _ingest_idea_capture(export_path, brain_root=brain_root, private_root=private_root,
+                                    effective_mode=effective_mode, brain_indexes=brain_indexes)
     if fmt == "claude.ai":
         convos = claude_ai_handler.parse_export(export_path)
         selected_members = (export_path.name,)
@@ -801,6 +806,64 @@ def _ingest_kura_capture(
             root=private_root,
         )
         return [result]
+
+
+def _ingest_idea_capture(
+    export_path: Path,
+    *,
+    brain_root: Path,
+    private_root: Path,
+    effective_mode: Mode,
+    brain_indexes: dict[str, dict[str, Path]] | None = None,
+) -> list[DualWriteResult]:
+    import frontmatter
+    from sbo_ingestion.dual_write import _date_from, _now_iso, _render_brain_body
+
+    obj, raw_bytes = idea_capture_handler.read_and_validate_packet(export_path)
+    semantic_id = idea_capture_handler.compute_semantic_identity(obj)
+    convo = idea_capture_handler.create_idea_conversation(obj, semantic_id)
+    date = _date_from(convo.created_at)
+
+    private_dir = private_root / "chat-history" / "idea-capture"
+    private_dir.mkdir(parents=True, exist_ok=True)
+    private_path = private_dir / f"{date}-{convo.uuid}.json"
+    if not private_path.exists():
+        _atomic_write_text(private_path, raw_bytes.decode("utf-8-sig"), root=private_root)
+
+    indexes = brain_indexes if brain_indexes is not None else {}
+    if "idea-capture" not in indexes:
+        indexes["idea-capture"] = index_existing_brain_paths(brain_root=brain_root, platform="idea-capture")
+    existing = indexes["idea-capture"]
+
+    brain_dir = brain_root / "_inbox" / "idea-capture"
+    brain_dir.mkdir(parents=True, exist_ok=True)
+    brain_path = existing.get(convo.uuid, brain_dir / f"{date}-{convo.uuid}.md")
+
+    if brain_path.exists():
+        return [DualWriteResult(private_path=private_path, brain_path=brain_path, brain_preserved=True)]
+
+    summary = _dry_run_summary(convo) if effective_mode == "dry-run" else _agent_stub_summary(convo)
+    brain_body = _render_brain_body(summary)
+    brain_post = frontmatter.Post(
+        content=brain_body,
+        source="idea-capture",
+        conversation_id=convo.uuid,
+        imported=_now_iso(),
+        private_file=f"chat-history/idea-capture/{private_path.name}",
+        status="needs-summary" if effective_mode == "agent" else "triage",
+        trust="untrusted-data",
+        tags=["draft", "needs-summary"] if effective_mode == "agent" else ["draft", "needs-triage"],
+    )
+    _atomic_write_text(brain_path, frontmatter.dumps(brain_post), root=brain_root)
+    existing[convo.uuid] = brain_path
+
+    audit.record_ingest(private_root, conversation_id=convo.uuid, mode=effective_mode, fmt="idea-capture",
+                        raw_path=private_path, brain_path=brain_path, source=export_path.name,
+                        brain_preserved=False, private_root_for_rel=private_root, brain_root_for_rel=brain_root)
+    audit.record_import_receipt(private_root, source_name=export_path.name, source_size=export_path.stat().st_size,
+                                fmt="idea-capture", selected_members=(export_path.name,), conversation_count=1,
+                                brain_created=1, brain_preserved=0)
+    return [DualWriteResult(private_path=private_path, brain_path=brain_path)]
 
 
 def _mark_needs_summary(brain_path: Path, *, brain_root: Path) -> None:
