@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sbo_ingestion.voice_check import find_slop_phrases, score_voice
+from sbo_ingestion.voice_check import _load_banned_phrases, find_slop_phrases, score_voice
 
 
 def test_finds_banned_phrases() -> None:
@@ -50,3 +50,17 @@ def test_banned_phrases_file_with_curly_and_indented_comment(tmp_path, monkeypat
 
     hits = find_slop_phrases("Please don't do this here.")
     assert hits == ("don't do this",)
+
+
+def test_left_single_quote_detected() -> None:
+    text = "It\u2018s worth noting that this works."
+    hits = find_slop_phrases(text)
+    assert hits == ("it's worth noting",)
+
+
+def test_indented_comment_is_not_loaded_as_a_phrase(tmp_path, monkeypatch) -> None:
+    phrases_file = tmp_path / "banned.txt"
+    phrases_file.write_text("   # banned comment phrase\nreal phrase\n", encoding="utf-8")
+    monkeypatch.setenv("SBO_BANNED_PHRASES_FILE", str(phrases_file))
+
+    assert _load_banned_phrases() == ("real phrase",)
