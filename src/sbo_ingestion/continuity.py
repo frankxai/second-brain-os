@@ -139,8 +139,28 @@ def restore_continuity_state(backup_path: Path, starlight_c_dir: Path | None = N
     """Restore ~/.starlight/c continuity directory from backup."""
     if not backup_path.exists():
         raise FileNotFoundError(f"Backup path does not exist: {backup_path}")
+    if not backup_path.is_dir():
+        raise NotADirectoryError(f"Backup path is not a directory: {backup_path}")
+
     target = get_starlight_continuity_dir(starlight_c_dir)
-    if target.exists():
-        shutil.rmtree(target)
-    shutil.copytree(backup_path, target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temp_target = (
+        target.parent / f".tmp_{target.name}_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S_%f')}"
+    )
+
+    try:
+        shutil.copytree(backup_path, temp_target)
+        if target.exists():
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+        shutil.move(temp_target, target)
+    finally:
+        if temp_target.exists():
+            if temp_target.is_dir():
+                shutil.rmtree(temp_target)
+            else:
+                temp_target.unlink()
+
     return target
