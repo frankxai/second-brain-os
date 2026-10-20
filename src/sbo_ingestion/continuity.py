@@ -152,11 +152,13 @@ def restore_continuity_state(backup_path: Path, starlight_c_dir: Path | None = N
     staging = target.with_name(f".restore_{target.name}_{token}")
     previous = target.with_name(f".previous_{target.name}_{token}")
 
-    if staging.exists() or previous.exists():
-        raise FileExistsError(f"Restore scratch path already exists: {staging}")
-
+    if previous.exists():
+        raise FileExistsError(f"Restore scratch path already exists: {previous}")
+    # mkdir is the atomic claim: it raises if the name is taken,
+    # so cleanup only ever removes a directory this call created.
+    staging.mkdir()
     try:
-        shutil.copytree(backup_path, staging)
+        shutil.copytree(backup_path, staging, dirs_exist_ok=True)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
@@ -167,10 +169,18 @@ def restore_continuity_state(backup_path: Path, starlight_c_dir: Path | None = N
             os.replace(target, previous)
             moved_previous = True
         os.replace(staging, target)
-    except BaseException:
-        if moved_previous and not target.exists():
-            os.replace(previous, target)
+    except BaseException as error:
         shutil.rmtree(staging, ignore_errors=True)
+        if moved_previous:
+            if target.exists():
+                error.add_note(
+                    f"Another process recreated {target}; previous state kept at {previous}"
+                )
+            else:
+                try:
+                    os.replace(previous, target)
+                except OSError:
+                    error.add_note(f"Rollback failed; previous state kept at {previous}")
         raise
 
     if moved_previous:
