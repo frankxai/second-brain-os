@@ -32,21 +32,25 @@ DEFAULT_BANNED_PHRASES: tuple[str, ...] = (
 )
 
 
+def _normalize_apostrophes(text: str) -> str:
+    return text.replace("\u2018", "'").replace("\u2019", "'")
+
+
 def _load_banned_phrases() -> tuple[str, ...]:
     """Allow OSS users to override via env or file. Default = built-in list."""
     env = os.environ.get("SBO_BANNED_PHRASES_FILE")
     if env and Path(env).exists():
         return tuple(
-            line.strip().lower()
+            _normalize_apostrophes(line.strip().lower())
             for line in Path(env).read_text(encoding="utf-8").splitlines()
-            if line.strip() and not line.startswith("#")
+            if line.strip() and not line.strip().startswith("#")
         )
     return DEFAULT_BANNED_PHRASES
 
 
 def find_slop_phrases(text: str) -> tuple[str, ...]:
     """Return a tuple of banned phrases found in text (case-insensitive)."""
-    text_lower = text.lower()
+    text_lower = _normalize_apostrophes(text.lower())
     phrases = _load_banned_phrases()
     hits: list[str] = []
     for p in phrases:

@@ -31,5 +31,22 @@ def test_score_clean() -> None:
 
 
 def test_score_degraded_for_slop() -> None:
-    score = score_voice("Let's delve into the topic. Dive into the details. Certainly worth noting.")
+    score = score_voice(
+        "Let's delve into the topic. Dive into the details. Certainly worth noting."
+    )
     assert 0.0 <= score < 1.0
+
+
+def test_curly_apostrophe_detected() -> None:
+    text = "It\u2019s worth noting that this works."
+    hits = find_slop_phrases(text)
+    assert hits == ("it's worth noting",)
+
+
+def test_banned_phrases_file_with_curly_and_indented_comment(tmp_path, monkeypatch) -> None:
+    phrases_file = tmp_path / "banned.txt"
+    phrases_file.write_text("   # Indented comment\n  don\u2019t do this  \n", encoding="utf-8")
+    monkeypatch.setenv("SBO_BANNED_PHRASES_FILE", str(phrases_file))
+
+    hits = find_slop_phrases("Please don't do this here.")
+    assert hits == ("don't do this",)
