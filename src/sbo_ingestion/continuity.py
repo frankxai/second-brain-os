@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -143,24 +144,35 @@ def restore_continuity_state(backup_path: Path, starlight_c_dir: Path | None = N
         raise NotADirectoryError(f"Backup path is not a directory: {backup_path}")
 
     target = get_starlight_continuity_dir(starlight_c_dir)
+    if target.exists() and not target.is_dir():
+        raise NotADirectoryError(f"Continuity path is not a directory: {target}")
     target.parent.mkdir(parents=True, exist_ok=True)
-    temp_target = (
-        target.parent / f".tmp_{target.name}_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S_%f')}"
-    )
+
+    token = uuid.uuid4().hex
+    staging = target.with_name(f".restore_{target.name}_{token}")
+    previous = target.with_name(f".previous_{target.name}_{token}")
+
+    if staging.exists() or previous.exists():
+        raise FileExistsError(f"Restore scratch path already exists: {staging}")
 
     try:
-        shutil.copytree(backup_path, temp_target)
-        if target.exists():
-            if target.is_dir():
-                shutil.rmtree(target)
-            else:
-                target.unlink()
-        shutil.move(temp_target, target)
-    finally:
-        if temp_target.exists():
-            if temp_target.is_dir():
-                shutil.rmtree(temp_target)
-            else:
-                temp_target.unlink()
+        shutil.copytree(backup_path, staging)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
 
+    moved_previous = False
+    try:
+        if target.exists():
+            os.replace(target, previous)
+            moved_previous = True
+        os.replace(staging, target)
+    except BaseException:
+        if moved_previous and not target.exists():
+            os.replace(previous, target)
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+    if moved_previous:
+        shutil.rmtree(previous, ignore_errors=True)
     return target

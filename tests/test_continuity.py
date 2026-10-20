@@ -1,5 +1,6 @@
 """Tests for session continuity, SIS detection, draft trust policy, and recovery."""
 
+import os
 from pathlib import Path
 
 import frontmatter
@@ -101,3 +102,88 @@ def test_restore_continuity_state_missing_backup_leaves_live_intact(tmp_path: Pa
 
     assert live.exists()
     assert (live / "active_session.json").read_text(encoding="utf-8") == '{"status": "active"}'
+
+
+def _scratch_dirs(parent: Path) -> list[str]:
+    prefixes = (".restore_", ".previous_")
+    return sorted(p.name for p in parent.iterdir() if p.name.startswith(prefixes))
+
+
+def test_restore_refuses_a_file_at_the_target_and_keeps_it(tmp_path: Path) -> None:
+    backup = tmp_path / "backup"
+    backup.mkdir()
+    (backup / "session.json").write_text('{"task": "backup"}', encoding="utf-8")
+    target = tmp_path / "c"
+    target.write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(NotADirectoryError):
+        restore_continuity_state(backup, starlight_c_dir=target)
+
+    assert target.read_text(encoding="utf-8") == "not a directory"
+    assert _scratch_dirs(tmp_path) == []
+
+
+def test_restore_copy_failure_leaves_live_state_and_no_scratch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backup = tmp_path / "backup"
+    backup.mkdir()
+    (backup / "session.json").write_text('{"task": "backup"}', encoding="utf-8")
+    live = tmp_path / "c"
+    live.mkdir()
+    (live / "session.json").write_text('{"task": "live"}', encoding="utf-8")
+
+    def broken_copytree(*_args: object, **_kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("sbo_ingestion.continuity.shutil.copytree", broken_copytree)
+
+    with pytest.raises(OSError, match="disk full"):
+        restore_continuity_state(backup, starlight_c_dir=live)
+
+    assert (live / "session.json").read_text(encoding="utf-8") == '{"task": "live"}'
+    assert _scratch_dirs(tmp_path) == []
+
+
+def test_restore_swap_failure_rolls_back_to_the_live_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backup = tmp_path / "backup"
+    backup.mkdir()
+    (backup / "session.json").write_text('{"task": "backup"}', encoding="utf-8")
+    live = tmp_path / "c"
+    live.mkdir()
+    (live / "session.json").write_text('{"task": "live"}', encoding="utf-8")
+
+    real_replace = os.replace
+    calls = {"n": 0}
+
+    def replace_fails_on_second_call(src: object, dst: object) -> None:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise PermissionError("locked")
+        real_replace(src, dst)
+
+    monkeypatch.setattr("sbo_ingestion.continuity.os.replace", replace_fails_on_second_call)
+
+    with pytest.raises(PermissionError):
+        restore_continuity_state(backup, starlight_c_dir=live)
+
+    assert (live / "session.json").read_text(encoding="utf-8") == '{"task": "live"}'
+    assert _scratch_dirs(tmp_path) == []
+
+
+def test_restore_success_replaces_live_and_leaves_no_scratch(tmp_path: Path) -> None:
+    backup = tmp_path / "backup"
+    backup.mkdir()
+    (backup / "session.json").write_text('{"task": "backup"}', encoding="utf-8")
+    live = tmp_path / "c"
+    live.mkdir()
+    (live / "stale.json").write_text("{}", encoding="utf-8")
+
+    restored = restore_continuity_state(backup, starlight_c_dir=live)
+
+    assert restored == live
+    assert (live / "session.json").read_text(encoding="utf-8") == '{"task": "backup"}'
+    assert not (live / "stale.json").exists()
+    assert _scratch_dirs(tmp_path) == []
