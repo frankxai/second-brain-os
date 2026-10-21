@@ -1,8 +1,11 @@
 """Tests for session continuity, SIS detection, draft trust policy, and recovery."""
 
+import os
+import uuid
 from pathlib import Path
 
 import frontmatter
+import pytest
 
 from sbo_ingestion.continuity import (
     backup_continuity_state,
@@ -68,6 +71,199 @@ def test_backup_and_restore_continuity_state(tmp_path: Path) -> None:
 
     (c_dir / "session.json").write_text('{"task": "corrupt"}', encoding="utf-8")
 
-    restored = tmp_path / "c_restored"
-    restore_continuity_state(backup_path, starlight_c_dir=restored)
-    assert (restored / "session.json").read_text(encoding="utf-8") == '{"task": "test"}'
+    restored = restore_continuity_state(backup_path, starlight_c_dir=c_dir)
+    assert restored == c_dir
+    assert (c_dir / "session.json").read_text(encoding="utf-8") == '{"task": "test"}'
+
+
+def test_restore_continuity_state_file_backup_leaves_live_intact(tmp_path: Path) -> None:
+    live = tmp_path / "live"
+    live.mkdir(parents=True)
+    (live / "active_session.json").write_text('{"status": "active"}', encoding="utf-8")
+
+    notadir = tmp_path / "notadir.txt"
+    notadir.write_text("plain file", encoding="utf-8")
+
+    with pytest.raises(NotADirectoryError):
+        restore_continuity_state(notadir, starlight_c_dir=live)
+
+    assert live.exists()
+    assert (live / "active_session.json").read_text(encoding="utf-8") == '{"status": "active"}'
+
+
+def test_restore_continuity_state_missing_backup_leaves_live_intact(tmp_path: Path) -> None:
+    live = tmp_path / "live"
+    live.mkdir(parents=True)
+    (live / "active_session.json").write_text('{"status": "active"}', encoding="utf-8")
+
+    missing = tmp_path / "nonexistent"
+
+    with pytest.raises(FileNotFoundError):
+        restore_continuity_state(missing, starlight_c_dir=live)
+
+    assert live.exists()
+    assert (live / "active_session.json").read_text(encoding="utf-8") == '{"status": "active"}'
+
+
+def _scratch_dirs(parent: Path) -> list[str]:
+    prefixes = (".restore_", ".previous_")
+    return sorted(p.name for p in parent.iterdir() if p.name.startswith(prefixes))
+
+
+def test_restore_refuses_a_file_at_the_target_and_keeps_it(tmp_path: Path) -> None:
+    backup = tmp_path / "backup"
+    backup.mkdir()
+    (backup / "session.json").write_text('{"task": "backup"}', encoding="utf-8")
+    target = tmp_path / "c"
+    target.write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(NotADirectoryError):
+        restore_continuity_state(backup, starlight_c_dir=target)
+
+    assert target.read_text(encoding="utf-8") == "not a directory"
+    assert _scratch_dirs(tmp_path) == []
+
+
+def test_restore_copy_failure_leaves_live_state_and_no_scratch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backup = tmp_path / "backup"
+    backup.mkdir()
+    (backup / "session.json").write_text('{"task": "backup"}', encoding="utf-8")
+    live = tmp_path / "c"
+    live.mkdir()
+    (live / "session.json").write_text('{"task": "live"}', encoding="utf-8")
+
+    def broken_copytree(*_args: object, **_kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("sbo_ingestion.continuity.shutil.copytree", broken_copytree)
+
+    with pytest.raises(OSError, match="disk full"):
+        restore_continuity_state(backup, starlight_c_dir=live)
+
+    assert (live / "session.json").read_text(encoding="utf-8") == '{"task": "live"}'
+    assert _scratch_dirs(tmp_path) == []
+
+
+def test_restore_swap_failure_rolls_back_to_the_live_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backup = tmp_path / "backup"
+    backup.mkdir()
+    (backup / "session.json").write_text('{"task": "backup"}', encoding="utf-8")
+    live = tmp_path / "c"
+    live.mkdir()
+    (live / "session.json").write_text('{"task": "live"}', encoding="utf-8")
+
+    real_replace = os.replace
+    calls = {"n": 0}
+
+    def replace_fails_on_second_call(src: object, dst: object) -> None:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise PermissionError("locked")
+        real_replace(src, dst)
+
+    monkeypatch.setattr("sbo_ingestion.continuity.os.replace", replace_fails_on_second_call)
+
+    with pytest.raises(PermissionError):
+        restore_continuity_state(backup, starlight_c_dir=live)
+
+    assert (live / "session.json").read_text(encoding="utf-8") == '{"task": "live"}'
+    assert _scratch_dirs(tmp_path) == []
+
+
+def test_restore_success_replaces_live_and_leaves_no_scratch(tmp_path: Path) -> None:
+    backup = tmp_path / "backup"
+    backup.mkdir()
+    (backup / "session.json").write_text('{"task": "backup"}', encoding="utf-8")
+    live = tmp_path / "c"
+    live.mkdir()
+    (live / "stale.json").write_text("{}", encoding="utf-8")
+
+    restored = restore_continuity_state(backup, starlight_c_dir=live)
+
+    assert restored == live
+    assert (live / "session.json").read_text(encoding="utf-8") == '{"task": "backup"}'
+    assert not (live / "stale.json").exists()
+    assert _scratch_dirs(tmp_path) == []
+
+
+def _seed(tmp_path: Path) -> tuple[Path, Path]:
+    backup = tmp_path / "backup"
+    backup.mkdir()
+    (backup / "session.json").write_text('{"task": "backup"}', encoding="utf-8")
+    live = tmp_path / "c"
+    live.mkdir()
+    (live / "session.json").write_text('{"task": "live"}', encoding="utf-8")
+    return backup, live
+
+
+def test_restore_rollback_failure_keeps_previous_state_and_names_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backup, live = _seed(tmp_path)
+    real_replace = os.replace
+    calls = {"n": 0}
+
+    def replace_fails_after_first(src: object, dst: object) -> None:
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise PermissionError("locked")
+        real_replace(src, dst)
+
+    monkeypatch.setattr("sbo_ingestion.continuity.os.replace", replace_fails_after_first)
+
+    with pytest.raises(PermissionError) as raised:
+        restore_continuity_state(backup, starlight_c_dir=live)
+
+    previous = [p for p in tmp_path.iterdir() if p.name.startswith(".previous_")]
+    assert len(previous) == 1
+    assert (previous[0] / "session.json").read_text(encoding="utf-8") == '{"task": "live"}'
+    assert any(previous[0].name in note for note in raised.value.__notes__)
+    assert not [p for p in tmp_path.iterdir() if p.name.startswith(".restore_")]
+
+
+def test_restore_never_overwrites_a_target_recreated_by_another_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backup, live = _seed(tmp_path)
+    real_replace = os.replace
+    calls = {"n": 0}
+
+    def another_process_wins(src: object, dst: object) -> None:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            live.mkdir()
+            (live / "other.json").write_text("{}", encoding="utf-8")
+            raise PermissionError("raced")
+        real_replace(src, dst)
+
+    monkeypatch.setattr("sbo_ingestion.continuity.os.replace", another_process_wins)
+
+    with pytest.raises(PermissionError) as raised:
+        restore_continuity_state(backup, starlight_c_dir=live)
+
+    assert (live / "other.json").exists()
+    previous = [p for p in tmp_path.iterdir() if p.name.startswith(".previous_")]
+    assert len(previous) == 1
+    assert (previous[0] / "session.json").read_text(encoding="utf-8") == '{"task": "live"}'
+    assert any("recreated" in note for note in raised.value.__notes__)
+
+
+def test_restore_does_not_delete_a_scratch_path_it_did_not_create(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backup, live = _seed(tmp_path)
+    fixed = uuid.UUID(int=1)
+    monkeypatch.setattr("sbo_ingestion.continuity.uuid.uuid4", lambda: fixed)
+    foreign = tmp_path / f".restore_c_{fixed.hex}"
+    foreign.mkdir()
+    (foreign / "marker.txt").write_text("not ours", encoding="utf-8")
+
+    with pytest.raises(FileExistsError):
+        restore_continuity_state(backup, starlight_c_dir=live)
+
+    assert (foreign / "marker.txt").read_text(encoding="utf-8") == "not ours"
+    assert (live / "session.json").read_text(encoding="utf-8") == '{"task": "live"}'

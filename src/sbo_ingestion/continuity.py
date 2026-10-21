@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -139,8 +140,49 @@ def restore_continuity_state(backup_path: Path, starlight_c_dir: Path | None = N
     """Restore ~/.starlight/c continuity directory from backup."""
     if not backup_path.exists():
         raise FileNotFoundError(f"Backup path does not exist: {backup_path}")
+    if not backup_path.is_dir():
+        raise NotADirectoryError(f"Backup path is not a directory: {backup_path}")
+
     target = get_starlight_continuity_dir(starlight_c_dir)
-    if target.exists():
-        shutil.rmtree(target)
-    shutil.copytree(backup_path, target)
+    if target.exists() and not target.is_dir():
+        raise NotADirectoryError(f"Continuity path is not a directory: {target}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    token = uuid.uuid4().hex
+    staging = target.with_name(f".restore_{target.name}_{token}")
+    previous = target.with_name(f".previous_{target.name}_{token}")
+
+    if previous.exists():
+        raise FileExistsError(f"Restore scratch path already exists: {previous}")
+    # mkdir is the atomic claim: it raises if the name is taken,
+    # so cleanup only ever removes a directory this call created.
+    staging.mkdir()
+    try:
+        shutil.copytree(backup_path, staging, dirs_exist_ok=True)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+    moved_previous = False
+    try:
+        if target.exists():
+            os.replace(target, previous)
+            moved_previous = True
+        os.replace(staging, target)
+    except BaseException as error:
+        shutil.rmtree(staging, ignore_errors=True)
+        if moved_previous:
+            if target.exists():
+                error.add_note(
+                    f"Another process recreated {target}; previous state kept at {previous}"
+                )
+            else:
+                try:
+                    os.replace(previous, target)
+                except OSError:
+                    error.add_note(f"Rollback failed; previous state kept at {previous}")
+        raise
+
+    if moved_previous:
+        shutil.rmtree(previous, ignore_errors=True)
     return target
