@@ -34,6 +34,7 @@ from anthropic import AnthropicError
 from yaml import YAMLError
 
 from sbo_ingestion import audit
+from sbo_ingestion.handlers.claude_ai import Conversation
 from sbo_ingestion.dual_write import (
     DualWriteResult,
     _assert_descendant,
@@ -163,7 +164,7 @@ def _atomic_write_bytes(path: Path, data: bytes, *, root: Path) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _agent_stub_summary(convo) -> Summary:  # type: ignore[no-untyped-def]
+def _agent_stub_summary(convo: Conversation) -> Summary:
     """Stub Summary written in agent mode. The /distill-inbox agent fills the real one."""
     return Summary(
         title=convo.title or "(untitled conversation)",
@@ -183,7 +184,7 @@ def _agent_stub_summary(convo) -> Summary:  # type: ignore[no-untyped-def]
     )
 
 
-def _dry_run_summary(convo) -> Summary:  # type: ignore[no-untyped-def]
+def _dry_run_summary(convo: Conversation) -> Summary:
     """Stub Summary written in dry-run mode. No follow-up expected."""
     return Summary(
         title=convo.title or "(untitled conversation)",
@@ -248,7 +249,7 @@ def _resolve_export_paths(export_path: Path, failures: list[str] | None = None) 
     if export_path.is_dir():
         discovery_failures: list[str] | None = [] if failures is not None else None
         captures = kura_handler.discover(export_path, discovery_failures)
-        if discovery_failures:
+        if discovery_failures and failures is not None:
             failures.extend(discovery_failures)
         if captures or discovery_failures:
             return captures
@@ -389,16 +390,16 @@ def _ingest_file(
     if fmt == "idea-capture":
         return _ingest_idea_capture(export_path, brain_root=brain_root, private_root=private_root,
                                     effective_mode=effective_mode, brain_indexes=brain_indexes)
+    selected_members: tuple[str, ...]
     if fmt == "claude.ai":
         convos = claude_ai_handler.parse_export(export_path)
         selected_members = (export_path.name,)
     elif fmt == "chatgpt":
         convos = chatgpt_handler.parse_export(export_path)
-        selected_members = (
-            chatgpt_handler.conversation_members(export_path)
-            if export_path.suffix.lower() == ".zip"
-            else (export_path.name,)
-        )
+        if export_path.suffix.lower() == ".zip":
+            selected_members = tuple(chatgpt_handler.conversation_members(export_path))
+        else:
+            selected_members = (export_path.name,)
     else:
         raise ValueError(f"Unsupported format: {fmt}")
 
@@ -820,7 +821,8 @@ def _mark_needs_summary(brain_path: Path, *, brain_root: Path) -> None:
     post = frontmatter.load(brain_path)
     post["status"] = "needs-summary"
     # Tag for inbox filtering in Obsidian
-    tags = list(post.get("tags", []) or [])
+    post_tags = post.get("tags", [])
+    tags: list[str] = list(post_tags if isinstance(post_tags, list) else [])
     if "needs-summary" not in tags:
         tags.append("needs-summary")
     if "needs-triage" in tags:
@@ -830,17 +832,17 @@ def _mark_needs_summary(brain_path: Path, *, brain_root: Path) -> None:
 
 
 @click.command()
-@click.argument("export_paths", nargs=-1, type=click.Path(path_type=Path))
+@click.argument("export_paths", nargs=-1, type=click.Path(path_type=Path)) # type: ignore[type-var]
 @click.option(
     "--brain-root",
-    type=click.Path(path_type=Path),
+    type=click.Path(path_type=Path), # type: ignore[type-var]
     envvar="SBO_BRAIN_VAULT_ROOT",
     required=True,
     help="Path to your brain/ vault. Default: $SBO_BRAIN_VAULT_ROOT env var.",
 )
 @click.option(
     "--private-root",
-    type=click.Path(path_type=Path),
+    type=click.Path(path_type=Path), # type: ignore[type-var]
     envvar="SBO_PRIVATE_VAULT_ROOT",
     required=True,
     help="Path to your private/ vault. Default: $SBO_PRIVATE_VAULT_ROOT env var.",
@@ -885,7 +887,7 @@ def _mark_needs_summary(brain_path: Path, *, brain_root: Path) -> None:
 @click.option(
     "--memories",
     "memories_path",
-    type=click.Path(exists=True, path_type=Path),
+    type=click.Path(exists=True, path_type=Path), # type: ignore[type-var]
     default=None,
     help="Path to the export's memories.json (the AI's cross-conversation memory). "
     "If omitted, a memories.json sibling next to EXPORT_PATH is auto-detected.",
@@ -916,8 +918,11 @@ def cli(
         click.echo(f"[error] private vault not found at {private_root}", err=True)
         sys.exit(1)
 
+    mode_parsed: Mode | None = None
+    if mode_flag in ("agent", "api", "dry-run"):
+        mode_parsed = mode_flag # type: ignore[assignment]
     effective_mode = _resolve_mode(
-        mode_flag,  # type: ignore[arg-type]
+        mode_parsed,
         dry_run=dry_run,
     )
 
@@ -935,10 +940,10 @@ def cli(
             click.echo("[error] idea-capture format requires agent mode", err=True)
             sys.exit(1)
 
-        results: list[DualWriteResult] = []
+        idea_results: list[DualWriteResult] = []
         for path in export_paths:
             try:
-                results.extend(
+                idea_results.extend(
                     ingest(
                         path,
                         brain_root=brain_root,
@@ -952,8 +957,8 @@ def cli(
             except (ValueError, OSError) as e:
                 click.echo(f"[error] {e}", err=True)
                 sys.exit(1)
-        click.echo(f"[sbo] wrote {len(results)} conversation pairs")
-        for r in results:
+        click.echo(f"[sbo] wrote {len(idea_results)} conversation pairs")
+        for r in idea_results:
             click.echo(f"  raw:     {r.private_path}")
             click.echo(f"  summary: {r.brain_path}")
         click.echo(f"[sbo] audit:   {private_root}/_distill/audit.jsonl")
