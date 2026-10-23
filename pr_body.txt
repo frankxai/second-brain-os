@@ -1,0 +1,5 @@
+Class: fix
+
+* Added missing `.env.example` file populated with all environment variables mentioned in the codebase and documentation to fulfill the goal.
+* Verified the addition by executing `pytest -v` and `bash scripts/verify-privacy.sh templates/private-vault-skeleton` which both passed successfully.
+* Deliberately left formatting and code in other files untouched to comply with the constraint of only addressing this missing artifact without changing unrelated lines.
