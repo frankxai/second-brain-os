@@ -42,14 +42,16 @@ def test_safe_component_empty_fallback():
     assert safe_component("...", fallback="default") == "-"
     assert safe_component(" ", fallback="default") == "default"
 
-def test_ensure_within_valid():
-    root = Path("/tmp/root")
-    target = Path("/tmp/root/file.txt")
+def test_ensure_within_valid(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    target = root / "file.txt"
     # Using relative_to to bypass resolve() requiring existence in some cases
     assert ensure_within(root, target) == target
 
-def test_ensure_within_invalid():
-    root = Path("/tmp/root")
-    target = Path("/tmp/outside.txt")
+def test_ensure_within_invalid(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    target = tmp_path / "outside.txt"
     with pytest.raises(ValueError, match="refusing to write outside"):
         ensure_within(root, target)
