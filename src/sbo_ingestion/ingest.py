@@ -25,7 +25,7 @@ import sys
 from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Iterable, Literal, cast
 from uuid import uuid4
 
 import click
@@ -821,8 +821,8 @@ def _mark_needs_summary(brain_path: Path, *, brain_root: Path) -> None:
     post = frontmatter.load(brain_path)
     post["status"] = "needs-summary"
     # Tag for inbox filtering in Obsidian
-    post_tags = post.get("tags", [])
-    tags: list[str] = list(post_tags if isinstance(post_tags, list) else [])
+    raw_tags = post.get("tags", []) or []
+    tags: list[str] = list(cast(Iterable[str], raw_tags))
     if "needs-summary" not in tags:
         tags.append("needs-summary")
     if "needs-triage" in tags:
