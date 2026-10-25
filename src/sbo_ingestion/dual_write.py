@@ -20,8 +20,8 @@ from pathlib import Path
 import frontmatter
 from slugify import slugify
 
+from sbo_ingestion import audit, chatgpt_archive
 from sbo_ingestion.handlers.claude_ai import Conversation
-from sbo_ingestion import audit
 from sbo_ingestion.summarize import Summary
 
 
@@ -30,6 +30,8 @@ class DualWriteResult:
     private_path: Path
     brain_path: Path
     brain_preserved: bool = False
+    source_unchanged: bool = False
+    source_revised: bool = False
 
 
 def _date_from(iso: str) -> str:
@@ -52,6 +54,7 @@ def write_pair(
     brain_root: Path,
     private_root: Path,
     existing_brain_paths: dict[str, Path] | None = None,
+    initial_status: str = "triage",
 ) -> DualWriteResult:
     """Write the dual-write pair without replacing an existing distilled note.
 
@@ -59,6 +62,8 @@ def write_pair(
     Brain notes are identity-addressed and preserved when the same conversation
     was already ingested, so a re-import cannot erase later human/agent work.
     """
+    if convo.source_graph is not None and convo.uuid != convo.source_graph.stable_id:
+        raise ValueError("ChatGPT graph identity disagrees with conversation storage identity")
     date = _date_from(convo.created_at)
     platform_dir = convo.platform.replace(".", "-")  # claude.ai -> claude-ai
     conversation_token = _conversation_token(convo.uuid)
@@ -87,12 +92,14 @@ def write_pair(
                 and parts[2].endswith(".md")):
             candidate = private_root / reference
             _assert_descendant(candidate, private_root)
-            if candidate.exists() and frontmatter.load(candidate).get("conversation_id") != convo.uuid:
+            if (candidate.exists()
+                    and frontmatter.load(candidate).get("conversation_id") != convo.uuid):
                 raise FileExistsError("Existing private reference belongs to another conversation")
             private_path = candidate
             private_filename = candidate.name
     _assert_descendant(private_path, private_root)
-    if private_path.exists() and frontmatter.load(private_path).get("conversation_id") != convo.uuid:
+    if (private_path.exists()
+            and frontmatter.load(private_path).get("conversation_id") != convo.uuid):
         raise FileExistsError("Private path belongs to another conversation")
     if convo.source_url and private_path.exists():
         previous_raw = frontmatter.load(private_path)
@@ -102,7 +109,8 @@ def write_pair(
             private_path.parent.mkdir(parents=True, exist_ok=True)
             private_filename = str(private_path.relative_to(private_dir)).replace("\\", "/")
     _assert_descendant(private_path, private_root)
-    if private_path.exists() and frontmatter.load(private_path).get("conversation_id") != convo.uuid:
+    if (private_path.exists()
+            and frontmatter.load(private_path).get("conversation_id") != convo.uuid):
         raise FileExistsError("Private view path belongs to another conversation")
     private_post = frontmatter.Post(
         content=UNTRUSTED_BANNER + convo.to_raw_markdown() + UNTRUSTED_FOOTER,
@@ -118,6 +126,40 @@ def write_pair(
     if convo.source_url:
         private_post["source_url"] = convo.source_url
         private_post["capture_scope"] = "visible-browser-thread"
+    source_unchanged = False
+    source_revised = False
+    if convo.source_graph is not None:
+        graph = convo.source_graph
+        chatgpt_archive.checked(private_path, private_root)
+        if private_path.exists():
+            old_schema = frontmatter.load(private_path).get("source_schema")
+            if old_schema is not None and old_schema != graph.schema_version:
+                raise ValueError("Unsupported ChatGPT source schema; migration requires review")
+            active = frontmatter.load(private_path).get("source_content_sha256")
+            chatgpt_archive.assert_revision_forward(graph, active, private_root)
+        graph_path = chatgpt_archive.preserve_graph(graph, private_root)
+        private_post["source_graph"] = graph_path.relative_to(private_root).as_posix()
+        private_post["source_schema"] = graph.schema_version
+        private_post["source_content_sha256"] = graph.content_sha256
+        private_post["account_scope"] = graph.account_scope
+        if private_path.exists():
+            chatgpt_archive.checked(private_path, private_root)
+            previous = frontmatter.load(private_path)
+            source_unchanged = (
+                previous.get("source_schema") == graph.schema_version
+                and previous.get("source_content_sha256") == graph.content_sha256
+                and previous.get("account_scope") == graph.account_scope
+                and previous.content == private_post.content.strip()
+                and previous.get("conversation_id") == convo.uuid
+                and chatgpt_archive.active_graph_matches(
+                    previous.get("source_graph"), graph, private_root
+                )
+            )
+            if not source_unchanged:
+                prior = chatgpt_archive.preserve_previous(private_path, private_root)
+                private_post["previous_raw_sha256"] = prior
+                private_post["refresh_pending"] = brain_path.exists()
+                source_revised = True
     rendered_raw = frontmatter.dumps(private_post)
     if convo.source_url and private_path.exists():
         previous_text = private_path.read_text(encoding="utf-8")
@@ -128,7 +170,8 @@ def write_pair(
             _assert_descendant(history, private_root)
             history.parent.mkdir(parents=True, exist_ok=True)
             _atomic_write_text(history, previous_text, root=private_root)
-    _atomic_write_text(private_path, rendered_raw, root=private_root)
+    if not source_unchanged:
+        _atomic_write_text(private_path, rendered_raw, root=private_root)
 
     # Brain (summary)
     brain_dir = brain_root / "_inbox" / platform_dir
@@ -150,6 +193,8 @@ def write_pair(
             private_path=private_path,
             brain_path=brain_path,
             brain_preserved=True,
+            source_unchanged=source_unchanged,
+            source_revised=source_revised,
         )
 
     brain_body = _render_brain_body(summary)
@@ -161,9 +206,9 @@ def write_pair(
         conversation_id=convo.uuid,
         imported=_now_iso(),
         private_file=private_ref,
-        status="triage",
+        status=initial_status,
         trust="untrusted-data",
-        tags=["draft", "needs-triage"],
+        tags=["draft", "needs-summary" if initial_status == "needs-summary" else "needs-triage"],
     )
     if convo.source_url:
         brain_post["capture_scope"] = "visible-browser-thread"

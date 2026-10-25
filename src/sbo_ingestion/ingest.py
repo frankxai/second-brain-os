@@ -22,10 +22,11 @@ import json
 import os
 import re
 import sys
+from collections.abc import Iterable
 from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Iterable, Literal, cast
+from typing import Any, Literal, cast
 from uuid import uuid4
 
 import click
@@ -33,8 +34,7 @@ import frontmatter
 from anthropic import AnthropicError
 from yaml import YAMLError
 
-from sbo_ingestion import audit
-from sbo_ingestion.handlers.claude_ai import Conversation
+from sbo_ingestion import audit, chatgpt_archive
 from sbo_ingestion.dual_write import (
     DualWriteResult,
     _assert_descendant,
@@ -51,6 +51,7 @@ from sbo_ingestion.handlers import claude_ai as claude_ai_handler
 from sbo_ingestion.handlers import idea_capture as idea_capture_handler
 from sbo_ingestion.handlers import kura as kura_handler
 from sbo_ingestion.handlers import memories as memories_handler
+from sbo_ingestion.handlers.claude_ai import Conversation
 from sbo_ingestion.summarize import Summary, summarize
 
 Mode = Literal["agent", "api", "dry-run"]
@@ -296,6 +297,7 @@ def ingest(
     dry_run: bool = False,
     memories_path: Path | None = None,
     format: str | None = None,
+    account_scope: str | None = None,
 ) -> list[DualWriteResult]:
     """Ingest an export file, a directory of shards, or a glob.
 
@@ -350,6 +352,7 @@ def ingest(
                 memories_path=memories_path,
                 brain_indexes=brain_indexes,
                 format=format,
+                account_scope=account_scope,
             ))
         except (ValueError, OSError) as error:
             if path.name != "conversation.md":
@@ -365,11 +368,44 @@ def _ingest_file(
     *,
     brain_root: Path,
     private_root: Path,
+    account_scope: str | None = None,
+    **kwargs,
+) -> list[DualWriteResult]:
+    fmt = kwargs.get("format") or _detect_format(export_path)
+    if fmt != "chatgpt":
+        return _ingest_file_unlocked(
+            export_path, brain_root=brain_root, private_root=private_root, **kwargs
+        )
+    lock = chatgpt_archive.checked(private_root / "_distill/chatgpt/import.lock", private_root)
+    chatgpt_archive.checked(private_root / "_distill/audit.jsonl", private_root)
+    chatgpt_archive.checked(private_root / "_distill/audit.lock", private_root)
+    with audit.exclusive_lock(lock):
+        snapshot, batch = chatgpt_archive.preserve_export(export_path, private_root)
+        kwargs["memories_path"] = _find_memories(export_path, kwargs.get("memories_path"))
+        return _ingest_file_unlocked(
+            snapshot,
+            brain_root=brain_root,
+            private_root=private_root,
+            account_scope=account_scope,
+            source_name=export_path.name,
+            batch=batch,
+            **kwargs,
+        )
+
+
+def _ingest_file_unlocked(
+    export_path: Path,
+    *,
+    brain_root: Path,
+    private_root: Path,
     api_key: str,
     effective_mode: Mode,
     memories_path: Path | None = None,
     brain_indexes: dict[str, dict[str, Path]] | None = None,
     format: str | None = None,
+    account_scope: str | None = None,
+    source_name: str | None = None,
+    batch: str = "",
 ) -> list[DualWriteResult]:
     """Ingest a single export file with an already-resolved mode."""
     normalized_fmt = format.lower().replace("_", "-") if format else None
@@ -384,18 +420,29 @@ def _ingest_file(
 
     fmt = normalized_fmt or _detect_format(export_path)
     if fmt == "kura":
-        return _ingest_kura_capture(export_path, brain_root=brain_root, private_root=private_root,
-                                    api_key=api_key, effective_mode=effective_mode,
-                                    brain_indexes=brain_indexes)
+        return _ingest_kura_capture(
+            export_path,
+            brain_root=brain_root,
+            private_root=private_root,
+            api_key=api_key,
+            effective_mode=effective_mode,
+            brain_indexes=brain_indexes,
+        )
     if fmt == "idea-capture":
-        return _ingest_idea_capture(export_path, brain_root=brain_root, private_root=private_root,
-                                    effective_mode=effective_mode, brain_indexes=brain_indexes)
+        return _ingest_idea_capture(
+            export_path,
+            brain_root=brain_root,
+            private_root=private_root,
+            effective_mode=effective_mode,
+            brain_indexes=brain_indexes,
+        )
+    source_name = source_name or export_path.name
     selected_members: tuple[str, ...]
     if fmt == "claude.ai":
         convos = claude_ai_handler.parse_export(export_path)
         selected_members = (export_path.name,)
     elif fmt == "chatgpt":
-        convos = chatgpt_handler.parse_export(export_path)
+        convos = chatgpt_handler.parse_export(export_path, account_scope=account_scope)
         if export_path.suffix.lower() == ".zip":
             selected_members = tuple(chatgpt_handler.conversation_members(export_path))
         else:
@@ -403,6 +450,8 @@ def _ingest_file(
     else:
         raise ValueError(f"Unsupported format: {fmt}")
 
+    source_name = source_name or export_path.name
+    records = []
     results: list[DualWriteResult] = []
     index_convos = []
     platform = fmt
@@ -411,6 +460,9 @@ def _ingest_file(
         platform=fmt,
     )
     for convo in convos:
+        if convo.source_graph is not None:
+            graph = convo.source_graph
+            convo = replace(convo, uuid=graph.stable_id, source_graph=graph)
         platform = convo.platform
         if effective_mode == "api" and convo.uuid not in existing_brain_paths:
             summary = summarize(convo, api_key=api_key)
@@ -425,30 +477,59 @@ def _ingest_file(
             brain_root=brain_root,
             private_root=private_root,
             existing_brain_paths=existing_brain_paths,
+            initial_status="needs-summary" if effective_mode == "agent" else "triage",
         )
         # Stamp status: needs-summary for agent mode (the rest stay "triage")
-        if effective_mode == "agent" and not result.brain_preserved:
+        if effective_mode == "agent" and not result.brain_preserved and fmt != "chatgpt":
             _mark_needs_summary(result.brain_path, brain_root=brain_root)
 
-        audit.record_ingest(
-            private_root,
-            conversation_id=convo.uuid,
-            mode=effective_mode,
-            fmt=fmt,
-            raw_path=result.private_path,
-            brain_path=result.brain_path,
-            source=export_path.name,
-            brain_preserved=result.brain_preserved,
-            private_root_for_rel=private_root,
-            brain_root_for_rel=brain_root,
-        )
+        previous_raw_hash = frontmatter.load(result.private_path).get("previous_raw_sha256", "")
+        if convo.source_graph is not None or not result.source_unchanged:
+            audit.record_ingest(
+                private_root,
+                conversation_id=convo.uuid,
+                mode=effective_mode,
+                fmt=fmt,
+                raw_path=result.private_path,
+                brain_path=result.brain_path,
+                source=source_name,
+                completion_id=(
+                    sha256(
+                        f"{batch}:{convo.uuid}:{previous_raw_hash}".encode()
+                    ).hexdigest()
+                    if convo.source_graph is not None
+                    else ""
+                ),
+                brain_preserved=result.brain_preserved,
+                private_root_for_rel=private_root,
+                brain_root_for_rel=brain_root,
+            )
         results.append(result)
+        if convo.source_graph is not None:
+            graph = convo.source_graph
+            records.append(
+                {
+                    "stable_id": convo.uuid,
+                    "conversation_id": graph.conversation_id,
+                    "content_sha256": graph.content_sha256,
+                    "member": graph.member,
+                    "status": "unchanged"
+                    if result.source_unchanged
+                    else ("revised" if result.source_revised else "captured"),
+                    "created_at": convo.created_at,
+                    "updated_at": convo.updated_at,
+                    "diagnostics": graph.diagnostics,
+                    "selected_head": graph.selected_head,
+                    "raw_path": result.private_path.relative_to(private_root).as_posix(),
+                    "refresh_pending": result.brain_preserved and result.source_revised,
+                }
+            )
         # Keep only index metadata. Message bodies may be gigabytes across a full
         # export and have already been written to the private vault.
-        index_convos.append(replace(convo, messages=()))
+        index_convos.append(replace(convo, messages=(), source_graph=None))
 
     # Corpus map: newest-first {date, title, summary} table per platform.
-    if index_convos:
+    if index_convos and any(not r.source_unchanged for r in results):
         write_index(index_convos, brain_root=brain_root, platform=platform)
 
     # High-signal memory export, if the source export shipped a memories.json.
@@ -457,16 +538,26 @@ def _ingest_file(
         memories_handler.write_memory_export(found, brain_root=brain_root, platform=platform)
 
     preserved_count = sum(result.brain_preserved for result in results)
-    audit.record_import_receipt(
-        private_root,
-        source_name=export_path.name,
-        source_size=export_path.stat().st_size,
-        fmt=fmt,
-        selected_members=selected_members,
-        conversation_count=len(results),
-        brain_created=len(results) - preserved_count,
-        brain_preserved=preserved_count,
-    )
+    if fmt == "chatgpt":
+        chatgpt_archive.write_manifest(
+            private_root,
+            batch=batch,
+            account_scope=account_scope,
+            source_name=source_name,
+            members=selected_members,
+            records=records,
+        )
+    if any(not r.source_unchanged for r in results) or not results:
+        audit.record_import_receipt(
+            private_root,
+            source_name=source_name,
+            source_size=export_path.stat().st_size,
+            fmt=fmt,
+            selected_members=selected_members,
+            conversation_count=len(results),
+            brain_created=len(results) - preserved_count,
+            brain_preserved=preserved_count,
+        )
 
     return results
 
@@ -871,6 +962,8 @@ def _mark_needs_summary(brain_path: Path, *, brain_root: Path) -> None:
     default=None,
     help="Explicit export format (e.g. idea-capture).",
 )
+@click.option("--account-scope", default=None,
+              help="Opaque ChatGPT account namespace; omit only for legacy provisional IDs.")
 @click.option(
     "--api-key",
     envvar="ANTHROPIC_API_KEY",
@@ -901,6 +994,7 @@ def cli(
     api_key: str,
     dry_run: bool,
     memories_path: Path | None,
+    account_scope: str | None,
 ) -> None:
     """Ingest AI chat exports into your SBO vaults.
 
@@ -993,6 +1087,7 @@ def cli(
                         mode=effective_mode,
                         memories_path=memories_path,
                         format=format_option,
+                        account_scope=account_scope,
                     )
                 )
             except CaptureBatchError as error:
