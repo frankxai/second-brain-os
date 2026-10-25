@@ -62,6 +62,8 @@ def write_pair(
     Brain notes are identity-addressed and preserved when the same conversation
     was already ingested, so a re-import cannot erase later human/agent work.
     """
+    if convo.source_graph is not None and convo.uuid != convo.source_graph.stable_id:
+        raise ValueError("ChatGPT graph identity disagrees with conversation storage identity")
     date = _date_from(convo.created_at)
     platform_dir = convo.platform.replace(".", "-")  # claude.ai -> claude-ai
     conversation_token = _conversation_token(convo.uuid)
@@ -149,6 +151,9 @@ def write_pair(
                 and previous.get("account_scope") == graph.account_scope
                 and previous.content == private_post.content.strip()
                 and previous.get("conversation_id") == convo.uuid
+                and chatgpt_archive.active_graph_matches(
+                    previous.get("source_graph"), graph, private_root
+                )
             )
             if not source_unchanged:
                 prior = chatgpt_archive.preserve_previous(private_path, private_root)

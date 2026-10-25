@@ -80,6 +80,34 @@ def preserve_graph(graph: ChatGPTSource, root: Path) -> Path:
     )
 
 
+def active_graph_matches(reference: object, graph: ChatGPTSource, root: Path) -> bool:
+    if not isinstance(reference, str) or Path(reference).is_absolute():
+        return False
+    path = checked(root / reference, root)
+    token = sha256(graph.stable_id.encode()).hexdigest()
+    directory = checked(root / "_distill/chatgpt/sources" / token, root)
+    if path.parent != directory or not path.is_file():
+        return False
+    data = path.read_bytes()
+    if sha256(data).hexdigest() != path.stem:
+        return False
+    try:
+        envelope = json.loads(data)
+    except (ValueError, UnicodeError):
+        return False
+    return isinstance(envelope, dict) and all(
+        (
+            envelope.get("schema_version") == graph.schema_version,
+            envelope.get("provider") == graph.provider,
+            envelope.get("stable_id") == graph.stable_id,
+            envelope.get("account_scope") == graph.account_scope,
+            envelope.get("conversation_id") == graph.conversation_id,
+            envelope.get("content_sha256") == graph.content_sha256,
+            envelope.get("original") == json.loads(graph.original_json),
+        )
+    )
+
+
 def assert_revision_forward(graph: ChatGPTSource, active: str | None, root: Path) -> None:
     """An old export must not silently reactivate a superseded source revision."""
     if not active or active == graph.content_sha256:

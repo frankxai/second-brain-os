@@ -153,7 +153,7 @@ def _parse_array(
             member=member,
             member_sha256=member_hash,
         )
-        seen_ids.add(conversation.uuid)
+        seen_ids.add(identity)
         yield conversation
 
 
@@ -221,7 +221,7 @@ def _parse_conversation(obj: dict, **provenance) -> Conversation:
             )
         )
     return Conversation(
-        uuid=obj["id"],
+        uuid=graph.stable_id,
         title=obj.get("title") or "Untitled",
         created_at=_epoch_to_iso(obj.get("create_time")),
         updated_at=_epoch_to_iso(obj.get("update_time") or obj.get("create_time")),

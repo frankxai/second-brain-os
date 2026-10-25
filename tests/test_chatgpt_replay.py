@@ -263,3 +263,69 @@ def test_malformed_message_fails_with_bounded_error(branched_export, tmp_path, f
         next((tmp_path / "private/_distill/chatgpt/exports").rglob("original.json")).read_bytes()
         == branched_export.read_bytes()
     )
+
+
+def test_direct_parser_writer_cannot_cross_account_identity(branched_export, tmp_path):
+    from dataclasses import replace
+
+    from sbo_ingestion.dual_write import write_pair
+    from sbo_ingestion.handlers.chatgpt import parse_export
+    from sbo_ingestion.ingest import _agent_stub_summary
+
+    first = next(parse_export(branched_export, account_scope="account-a"))
+    second = next(parse_export(branched_export, account_scope="account-b"))
+    assert first.uuid != second.uuid
+    assert first.source_graph.conversation_id == second.source_graph.conversation_id
+    a = write_pair(
+        first,
+        _agent_stub_summary(first),
+        brain_root=tmp_path / "brain",
+        private_root=tmp_path / "private",
+    )
+    original = a.private_path.read_bytes()
+    b = write_pair(
+        second,
+        _agent_stub_summary(second),
+        brain_root=tmp_path / "brain",
+        private_root=tmp_path / "private",
+    )
+    assert a.private_path != b.private_path
+    assert a.brain_path != b.brain_path
+    assert a.private_path.read_bytes() == original
+    bad = replace(second, uuid=first.uuid)
+    with pytest.raises(ValueError, match="graph identity"):
+        write_pair(
+            bad,
+            _agent_stub_summary(bad),
+            brain_root=tmp_path / "brain",
+            private_root=tmp_path / "private",
+        )
+
+
+def test_scoped_duplicate_native_ids_in_one_member_reject(branched_export, tmp_path):
+    data = json.loads(branched_export.read_text())
+    branched_export.write_text(json.dumps(data + data))
+    with pytest.raises(ValueError, match="Duplicate conversation ID"):
+        run(branched_export, tmp_path)
+
+
+def test_dangling_source_pointer_is_repaired_with_history(branched_export, tmp_path):
+    result = run(branched_export, tmp_path)[0]
+    raw = frontmatter.load(result.private_path)
+    raw["source_graph"] = "_distill/chatgpt/sources/missing.json"
+    result.private_path.write_text(frontmatter.dumps(raw))
+    damaged = result.private_path.read_bytes()
+    repaired = run(branched_export, tmp_path)[0]
+    assert not repaired.source_unchanged
+    reference = frontmatter.load(repaired.private_path)["source_graph"]
+    assert (tmp_path / "private" / reference).is_file()
+    assert (
+        next(
+            (tmp_path / "private/_distill/chatgpt/history").rglob(
+                sha256(damaged).hexdigest() + ".md"
+            )
+        ).read_bytes()
+        == damaged
+    )
+    assert len((tmp_path / "private/_distill/audit.jsonl").read_text().splitlines()) == 2
+    assert run(branched_export, tmp_path)[0].source_unchanged

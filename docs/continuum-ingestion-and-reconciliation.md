@@ -151,8 +151,8 @@ A cooperating-writer lock serializes ChatGPT file imports. Existing atomic write
 and idempotent audit completion keys recover interrupted pair/audit/index writes.
 Completed file-hash manifests contain per-source status, hashes, watermarks,
 source-time bounds, diagnostics and explicit unknown denominators/windows.
-Immediate identical replay leaves vault contents unchanged and creates no new
-logical audit effect. Receipt corruption, redirected archive paths, incompatible
+For conversation imports without auxiliary `memories.json`, immediate identical
+replay leaves vault contents unchanged and creates no new logical audit effect. Receipt corruption, redirected archive paths, incompatible
 source versions and stale revision reactivation fail closed. Lock files may be
 opened on replay. File fsync plus atomic rename is tested for process interruption;
 directory-fsync durability after machine power loss is not certified.
@@ -200,6 +200,10 @@ Kura/export branch joins, automatic idea/outcome admission, Gemini Takeout,
 universal provider coverage and installed end-to-end harness resume. These must
 consume Memory #8/SIS #49 rather than fork their governance types. Official
 ChatGPT imports are tested here; other lanes retain their existing support level.
+The unchanged auxiliary `memories.json` adapter still rewrites its shared memory
+export and lacks scoped revision/curated-note protection. It is outside this
+conversation replay guarantee and must be reconciled before a real export pilot
+that includes that auxiliary file. Do not treat that lane as qualified.
 The full consumer-history denominator, actual worker/model cost, independent user
 acceptance and cost per accepted outcome remain unknown.
 
