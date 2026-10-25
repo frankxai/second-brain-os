@@ -34,7 +34,7 @@ def immutable_text(path: Path, text: str, root: Path) -> Path:
     checked(path, root)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
-        if path.read_text(encoding="utf-8") != text:
+        if path.read_bytes().decode("utf-8") != text:
             raise ValueError("Immutable ChatGPT source conflict; restore before retry")
         return path
     audit.atomic_write_text(path, text)
@@ -117,7 +117,7 @@ def assert_revision_forward(graph: ChatGPTSource, active: str | None, root: Path
     if directory.exists():
         for path in directory.glob("*.md"):
             checked(path, root)
-            text = path.read_text(encoding="utf-8")
+            text = path.read_bytes().decode("utf-8")
             if sha256(text.encode()).hexdigest() != path.stem:
                 raise ValueError("Private source history hash mismatch")
             previous = frontmatter.loads(text)
@@ -135,7 +135,7 @@ def preserve_previous(path: Path, root: Path) -> str | None:
     checked(path, root)
     if not path.exists():
         return None
-    text = path.read_text(encoding="utf-8")
+    text = path.read_bytes().decode("utf-8")
     digest = sha256(text.encode()).hexdigest()
     identity = frontmatter.loads(text).get("conversation_id", "")
     token = sha256(str(identity).encode()).hexdigest()
@@ -189,7 +189,7 @@ def write_manifest(
     }
     # A completed batch receipt is immutable: replay returns its original accounting.
     if path.exists():
-        previous = json.loads(path.read_text(encoding="utf-8"))
+        previous = json.loads(path.read_bytes().decode("utf-8"))
         fixed = (
             "schema_version",
             "provider",

@@ -329,3 +329,16 @@ def test_dangling_source_pointer_is_repaired_with_history(branched_export, tmp_p
     )
     assert len((tmp_path / "private/_distill/audit.jsonl").read_text().splitlines()) == 2
     assert run(branched_export, tmp_path)[0].source_unchanged
+
+
+def test_crlf_legacy_bytes_survive_history_copy(branched_export, tmp_path):
+    result = run(branched_export, tmp_path)[0]
+    raw = frontmatter.load(result.private_path)
+    del raw["source_schema"]
+    result.private_path.write_bytes(frontmatter.dumps(raw).encode().replace(b"\n", b"\r\n"))
+    previous = result.private_path.read_bytes()
+    run(branched_export, tmp_path)
+    history = next(
+        (tmp_path / "private/_distill/chatgpt/history").rglob(sha256(previous).hexdigest() + ".md")
+    )
+    assert history.read_bytes() == previous
