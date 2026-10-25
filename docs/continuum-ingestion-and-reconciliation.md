@@ -104,3 +104,142 @@ No new repo or database before checking canonical owners. No destructive merge, 
 - [Source governance epic](https://github.com/frankxai/Starlight-Intelligence-System/issues/48)
 - [Memory identity/admission issue](https://github.com/frankxai/starlight-memory/issues/8)
 - [Cross-harness actual activation](https://github.com/frankxai/agentic-ops/issues/181)
+
+## Bounded implementation and migration · 25 October 2026
+
+This PR now implements the ChatGPT source-intake slice. It does not activate a
+personal vault or a session hook. `sbo.chatgpt-source.v1` is a lossless provider
+source envelope, not a replacement for Memory's `SISMemoryRecord` or SIS session
+contracts. Raw provider objects retain all unknown fields; RFC 6901 references
+address original node content. Parent traversal determines a readable branch,
+not timestamps. System/tool roles, tool recipients/metadata, message IDs, raw
+timestamps, edited sibling prompts and non-text parts remain in private sources.
+`Conversation.messages` remains the compatible human/assistant text interface,
+now limited to the selected branch. Raw Markdown includes every role on that
+branch. Other branches render explicitly with `source_graph.to_markdown(head)`.
+Missing selection with multiple heads, cycles and inconsistent edges yield no
+selected conversation and explicit diagnostics. A unique head can be inferred;
+that inference does not invent a provider `current_node`.
+
+Original JSON/ZIP bytes are copied before parsing to private
+`_distill/chatgpt/exports/<file-sha256>/original.{json,zip}`. Content-addressed
+source envelopes retain export hash, shard/member hash, account scope, source
+coverage and branch selection. Previous active raw Markdown is saved by checksum
+under `_distill/chatgpt/history/<identity-hash>/` before replacement. Curated brain
+notes survive byte for byte; changed sources carry private `refresh_pending`.
+No existing vault is migrated. A legacy flattened raw file is backed up before
+its first graph-derived replacement. An already superseded source revision
+cannot reactivate from an old export without explicit review. Staged but never
+activated revisions can retry normally.
+
+Use an operator-supplied opaque account namespace for new scoped imports:
+
+```sh
+sbo-ingest /authorized/conversations.zip --account-scope account-opaque-id \
+  --brain-root /selected/brain --private-root /selected/private --mode agent
+```
+
+The account value is a namespace, not authenticated identity or an access grant.
+Provider-native conversation IDs remain in the private source envelope. Scoped
+storage IDs hash `[provider, account_scope, native_conversation_id]`. Omission
+preserves legacy vault identities and explicitly records unknown/provisional
+account coverage. Do not import one corpus with both identity modes and assume
+those notes were joined. Mapping legacy notes to a verified account is a separate
+reviewed migration. Scoped exports and unscoped Kura captures are not auto-joined.
+
+A cooperating-writer lock serializes ChatGPT file imports. Existing atomic writes
+and idempotent audit completion keys recover interrupted pair/audit/index writes.
+Completed file-hash manifests contain per-source status, hashes, watermarks,
+source-time bounds, diagnostics and explicit unknown denominators/windows.
+Immediate identical replay leaves vault contents unchanged and creates no new
+logical audit effect. Receipt corruption, redirected archive paths, incompatible
+source versions and stale revision reactivation fail closed. Lock files may be
+opened on replay. File fsync plus atomic rename is tested for process interruption;
+directory-fsync durability after machine power loss is not certified.
+
+Rollback means stop using the draft importer and retain all private originals,
+envelopes and prior-raw checksums. Restore a selected prior view only after its
+checksum, identity and owner approval are checked; do not bulk-reset either vault.
+The recovery tests reparse the retained original and replay interruption safely.
+No destructive restore tool or vault relocation is introduced.
+
+### Verification boundary and exact handoff
+
+Synthetic regressions first reproduced the chronological-branch defect. Tests
+now cover competing responses, edited sibling prompts, roles/tool causality,
+unknown selection, invalid ancestry, original-byte/hash preservation, scoped
+account separation, legacy upgrade, curated-note survival, corrupt manifests,
+stale revision denial, revised-source staging interruption and ten-conversation
+sharded imports interrupted by process exit at pair, audit, index and manifest
+boundaries. Every completed retry has ten distinct audit identities; replay
+preserves file contents. Existing Kura/native/continuity/privacy tests remain in
+the full suite. These are engineering fixtures, not ten authorized personal
+conversations, semantic acceptance or a new installed client integration.
+
+Source authority snapshots: Ops `40a38d02723a7c09298c31acf9077526f0ecfd44`, SBO main
+`ca432c24135dfd47dcd203097d8cb2f385402610`, Memory
+`948876302f9897a067ca7b8746e3ae965611f3b6`, SIS
+`e036722345a5ca1347dc12d12c5067295403348c`. PR #34 began at
+`3b01e88b3ddfb5da70752c7caaa6063684968a55`; no other open SBO patch overlapped.
+The prior Library ADR was absent from attached files and exact-name Drive search;
+its content has not been recovered or silently replaced by this document.
+
+Keep [SBO #10](https://github.com/frankxai/second-brain-os/issues/10) as the single
+implementation/acceptance issue. Responsible role: ingestion engineer, with the
+vault owner selecting ten sources and the target private root; independent
+provenance/recovery reviewer checks the exact head. Next gate: supply that bounded
+export, verify account namespace and selected roots, preserve recovery copies,
+then run ingest/replay/revision/retrieval/resume against those ten conversations.
+No real export or vault is available in this cloud workspace. Installed-hook
+activation remains with Ops #181/SIS #49 and the existing trust-policy/installation
+gates. No current client is counted as newly installed or live by this PR.
+
+Still unimplemented in this slice: source-policy tombstones/redaction propagation,
+brand/tenant authorization beyond the filesystem and namespace boundary, verified
+Kura/export branch joins, automatic idea/outcome admission, Gemini Takeout,
+universal provider coverage and installed end-to-end harness resume. These must
+consume Memory #8/SIS #49 rather than fork their governance types. Official
+ChatGPT imports are tested here; other lanes retain their existing support level.
+The full consumer-history denominator, actual worker/model cost, independent user
+acceptance and cost per accepted outcome remain unknown.
+
+## Existing operator application proposal
+
+Reviewed Ops `registry/github_organizations.yaml` identifies the org-native
+`Starlight-Intelligence/starlight-command-center`. The cloud Git credential cannot
+clone that owner (403); implementation-level placement there remains blocked.
+Do not create a replacement backend. The existing Canvas consumer was inspected
+at `dc76d37d48b1e52f0de5600543107aa47bb5d812`: `apps/web/app/continuity`, its read-only
+`api/continuity`, and `packages/core/src/atlas-context.ts` already project SIS and
+source-linked Atlas context. Extend the admitted operator owner first, retaining
+Canvas as a consumer; do not move authority into either UI.
+
+| View | Existing records to project | First consequential exception |
+| --- | --- | --- |
+| Now | Registry owner, owning issue, exact-head CI and unresolved decisions | failed proof, missing authorization, contradiction requiring a decision |
+| Ideas | admitted Memory entities/relations plus source anchors | competing decisions or an idea with no qualified execution owner |
+| Runs | SIS continuity work/session and owning PR | agent-reported completion without independently observed evidence |
+| Evidence | artifact/review/deployment/outcome references | stale, failed or missing receipt; never turn a merged PR into an outcome |
+| Reuse | one concept identity with many brand relations | duplicated owning work or incompatible acceptance criteria |
+| Coverage | private importer manifest through an authorized metadata projection | missing account/window, failed batch, unknown denominator |
+
+Each view needs brand filtering, observed/verified dates, lineage drill-down,
+costs and accepted outcomes with explicit unknowns. Raw prompts and private graph
+paths do not enter a shared UI by default. The proposed graph chain is Vision →
+Goal → Capability → Idea → Requirement → Owning work → Agent run → Artifact →
+Review → Deployment → Observed outcome → Lesson → Revision. Represent these with
+existing Memory entities/relations and source provenance, then resolve work to
+Registry/issue IDs. Retain prompt/output events separately from versioned edited
+interpretations; no source event alone ratifies a decision.
+
+Implementation acceptance belongs to the current operator owner: consume bounded,
+permission-filtered metadata; render unavailable/conflicting states first; prove
+cross-brand filtering and denied-source behavior; test a lineage drill-down to
+an authorized source; check keyboard/mobile/reduced-motion behavior. Measures:
+idea-to-proof latency (source idea timestamp to first accepted proof), independent
+acceptance rate (accepted/reviewed attempts), duplicate prevention (verified exact
+replays avoided), review effort (measured operator minutes), recovery rate
+(recovered/interrupted attempts) and cost per accepted outcome (all measured
+attempt costs/accepted outcomes). Empty denominators yield unknown, never zero
+cost or 100% coverage. This is an implementation proposal against existing owners,
+not a newly commissioned UI build or a running reconciliation worker.
