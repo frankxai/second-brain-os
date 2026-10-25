@@ -33,9 +33,9 @@ def test_source_graph_preserves_roles_edges_and_original_content(branched_export
 
 
 def test_ambiguous_missing_current_node_never_guesses(branched_export):
-    obj = json.loads(branched_export.read_text())[0]
+    obj = json.loads(branched_export.read_text(encoding="utf-8"))[0]
     del obj["current_node"]
-    branched_export.write_text(json.dumps([obj]))
+    branched_export.write_text(json.dumps([obj]), encoding="utf-8")
     convo = next(parse_export(branched_export))
     assert convo.messages == ()
     assert convo.source_graph.selected_head is None
@@ -43,9 +43,9 @@ def test_ambiguous_missing_current_node_never_guesses(branched_export):
 
 
 def test_cycle_fails_closed_without_losing_original(branched_export):
-    obj = json.loads(branched_export.read_text())[0]
+    obj = json.loads(branched_export.read_text(encoding="utf-8"))[0]
     obj["mapping"]["system"]["parent"] = "a2"
-    branched_export.write_text(json.dumps([obj]))
+    branched_export.write_text(json.dumps([obj]), encoding="utf-8")
     convo = next(parse_export(branched_export))
     assert convo.messages == ()
     assert convo.source_graph.diagnostics
@@ -72,7 +72,7 @@ def test_content_reference_addresses_original_node(branched_export):
 def test_missing_current_node_is_distinct_from_inferred_unique_head(chatgpt_export_path):
     from sbo_ingestion.handlers.chatgpt import _parse_conversation
 
-    obj = json.loads(chatgpt_export_path.read_text())[0]
+    obj = json.loads(chatgpt_export_path.read_text(encoding="utf-8"))[0]
     del obj["current_node"]
     graph = _parse_conversation(obj).source_graph
     assert graph.current_node is None

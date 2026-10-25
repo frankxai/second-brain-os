@@ -46,11 +46,13 @@ def test_identical_replay_has_no_file_effects(branched_export, tmp_path):
 def test_revision_retains_graph_raw_bytes_and_curated_note(branched_export, tmp_path):
     result = run(branched_export, tmp_path)[0]
     raw_before = result.private_path.read_bytes()
-    result.brain_path.write_text(result.brain_path.read_text() + "\nHuman interpretation\n")
+    result.brain_path.write_text(
+        result.brain_path.read_text(encoding="utf-8") + "\nHuman interpretation\n", encoding="utf-8"
+    )
     curated = result.brain_path.read_bytes()
-    data = json.loads(branched_export.read_text())
+    data = json.loads(branched_export.read_text(encoding="utf-8"))
     data[0]["mapping"]["a2"]["message"]["content"]["parts"] = ["revised answer"]
-    branched_export.write_text(json.dumps(data))
+    branched_export.write_text(json.dumps(data), encoding="utf-8")
     revised = run(branched_export, tmp_path)[0]
     assert revised.source_revised
     assert result.brain_path.read_bytes() == curated
@@ -76,7 +78,7 @@ def test_same_provider_id_in_two_accounts_stays_separate(branched_export, tmp_pa
 
 @pytest.mark.parametrize("phase", ["pair", "audit", "index", "manifest"])
 def test_ten_conversation_shards_resume_after_interruption(branched_export, tmp_path, phase):
-    base = json.loads(branched_export.read_text())[0]
+    base = json.loads(branched_export.read_text(encoding="utf-8"))[0]
     conversations = []
     for n in range(10):
         obj = deepcopy(base)
@@ -125,17 +127,23 @@ intake.ingest(Path(source), brain_root=Path(root)/'brain',
     assert len({r.private_path for r in resumed}) == 10
     events = [
         json.loads(line)
-        for line in (tmp_path / "private/_distill/audit.jsonl").read_text().splitlines()
+        for line in (tmp_path / "private/_distill/audit.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
     assert len(events) == 10
     assert len({e["completion_id"] for e in events}) == 10
     assert all(frontmatter.load(r.brain_path)["status"] == "needs-summary" for r in resumed)
-    assert all("alternate answer" not in r.private_path.read_text() for r in resumed)
+    assert all(
+        "alternate answer" not in r.private_path.read_text(encoding="utf-8") for r in resumed
+    )
     before = tree_bytes(tmp_path / "private"), tree_bytes(tmp_path / "brain")
     run(source, tmp_path)
     assert before == (tree_bytes(tmp_path / "private"), tree_bytes(tmp_path / "brain"))
     manifest = json.loads(
-        next((tmp_path / "private/_distill/chatgpt/imports").rglob("*.json")).read_text()
+        next((tmp_path / "private/_distill/chatgpt/imports").rglob("*.json")).read_text(
+            encoding="utf-8"
+        )
     )
     assert len(manifest["records"]) == 10
     assert manifest["account_denominator"] is None
@@ -149,7 +157,7 @@ def test_legacy_raw_is_preserved_before_graph_upgrade(branched_export, tmp_path)
     for key in ["source_schema", "source_graph", "source_content_sha256"]:
         del raw[key]
     raw.content = "Historical flattened transcript; do not lose it"
-    result.private_path.write_text(frontmatter.dumps(raw))
+    result.private_path.write_text(frontmatter.dumps(raw), encoding="utf-8")
     old = result.private_path.read_bytes()
     run(branched_export, tmp_path, None)
     assert (
@@ -176,9 +184,9 @@ def test_private_archive_symlink_is_rejected(branched_export, tmp_path):
 def test_corrupt_completed_manifest_is_rejected(branched_export, tmp_path):
     run(branched_export, tmp_path)
     receipt = next((tmp_path / "private/_distill/chatgpt/imports").rglob("*.json"))
-    payload = json.loads(receipt.read_text())
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
     payload["counts"]["captured"] = 9999
-    receipt.write_text(json.dumps(payload))
+    receipt.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ValueError, match="receipt counts"):
         run(branched_export, tmp_path)
 
@@ -188,7 +196,7 @@ def test_old_revision_cannot_silently_replace_newer_source(branched_export, tmp_
     result = run(branched_export, tmp_path)[0]
     data = json.loads(original)
     data[0]["title"] = "Revision B"
-    branched_export.write_text(json.dumps(data))
+    branched_export.write_text(json.dumps(data), encoding="utf-8")
     run(branched_export, tmp_path)
     latest = result.private_path.read_bytes()
     branched_export.write_bytes(original)
@@ -202,9 +210,9 @@ def test_revised_source_retries_after_graph_staging(branched_export, tmp_path, m
 
     result = run(branched_export, tmp_path)[0]
     old = result.private_path.read_bytes()
-    data = json.loads(branched_export.read_text())
+    data = json.loads(branched_export.read_text(encoding="utf-8"))
     data[0]["title"] = "Pending revision B"
-    branched_export.write_text(json.dumps(data))
+    branched_export.write_text(json.dumps(data), encoding="utf-8")
     original_write = dual_write._atomic_write_text
 
     def interrupt(path, *args, **kwargs):
@@ -218,7 +226,7 @@ def test_revised_source_retries_after_graph_staging(branched_export, tmp_path, m
             run(branched_export, tmp_path)
     assert result.private_path.read_bytes() == old
     resumed = run(branched_export, tmp_path)[0]
-    assert "Pending revision B" in resumed.private_path.read_text()
+    assert "Pending revision B" in resumed.private_path.read_text(encoding="utf-8")
     assert resumed.source_revised
 
 
@@ -242,7 +250,9 @@ def test_saved_original_rebuilds_deleted_derived_view(branched_export, tmp_path)
     assert frontmatter.load(restored.private_path).content == selected
     assert restored.brain_path.read_bytes() == note_bytes
     envelope = json.loads(
-        (tmp_path / "private" / frontmatter.load(restored.private_path)["source_graph"]).read_text()
+        (tmp_path / "private" / frontmatter.load(restored.private_path)["source_graph"]).read_text(
+            encoding="utf-8"
+        )
     )
     assert envelope["original"]["mapping"]["a1"]["message"]["content"]["parts"] == [
         "alternate answer"
@@ -254,9 +264,9 @@ def test_saved_original_rebuilds_deleted_derived_view(branched_export, tmp_path)
     [("author", "assistant"), ("content", 42), ("id", []), ("content", {"parts": "bad"})],
 )
 def test_malformed_message_fails_with_bounded_error(branched_export, tmp_path, field, value):
-    obj = json.loads(branched_export.read_text())
+    obj = json.loads(branched_export.read_text(encoding="utf-8"))
     obj[0]["mapping"]["a2"]["message"][field] = value
-    branched_export.write_text(json.dumps(obj))
+    branched_export.write_text(json.dumps(obj), encoding="utf-8")
     with pytest.raises(ValueError, match="Invalid ChatGPT"):
         run(branched_export, tmp_path)
     assert (
@@ -303,8 +313,8 @@ def test_direct_parser_writer_cannot_cross_account_identity(branched_export, tmp
 
 
 def test_scoped_duplicate_native_ids_in_one_member_reject(branched_export, tmp_path):
-    data = json.loads(branched_export.read_text())
-    branched_export.write_text(json.dumps(data + data))
+    data = json.loads(branched_export.read_text(encoding="utf-8"))
+    branched_export.write_text(json.dumps(data + data), encoding="utf-8")
     with pytest.raises(ValueError, match="Duplicate conversation ID"):
         run(branched_export, tmp_path)
 
@@ -313,7 +323,7 @@ def test_dangling_source_pointer_is_repaired_with_history(branched_export, tmp_p
     result = run(branched_export, tmp_path)[0]
     raw = frontmatter.load(result.private_path)
     raw["source_graph"] = "_distill/chatgpt/sources/missing.json"
-    result.private_path.write_text(frontmatter.dumps(raw))
+    result.private_path.write_text(frontmatter.dumps(raw), encoding="utf-8")
     damaged = result.private_path.read_bytes()
     repaired = run(branched_export, tmp_path)[0]
     assert not repaired.source_unchanged
@@ -327,7 +337,10 @@ def test_dangling_source_pointer_is_repaired_with_history(branched_export, tmp_p
         ).read_bytes()
         == damaged
     )
-    assert len((tmp_path / "private/_distill/audit.jsonl").read_text().splitlines()) == 2
+    assert (
+        len((tmp_path / "private/_distill/audit.jsonl").read_text(encoding="utf-8").splitlines())
+        == 2
+    )
     assert run(branched_export, tmp_path)[0].source_unchanged
 
 
