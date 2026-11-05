@@ -123,6 +123,7 @@ def record_ingest(
     brain_root_for_rel: Path | None = None,
     brain_preserved: bool = False,
     source: str = "",
+    completion_id: str = "",
 ) -> Path:
     """Convenience wrapper for the canonical ingest event shape."""
     raw_rel = _relpath(raw_path, private_root_for_rel or private_root)
@@ -138,6 +139,7 @@ def record_ingest(
             "brain_path": brain_rel,
             "brain_preserved": brain_preserved,
             "source": source,
+            **({"completion_id": completion_id} if completion_id else {}),
         },
     )
 

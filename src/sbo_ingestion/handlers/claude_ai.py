@@ -9,9 +9,13 @@ single JSON array (`.json`). Each conversation is an object with `uuid`, `name`,
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sbo_ingestion.handlers.chatgpt_source import ChatGPTSource
 
 
 @dataclass(frozen=True)
@@ -33,14 +37,20 @@ class Conversation:
     summary: str = ""  # per-conversation summary the Claude export carries, when present
     source_url: str = ""
 
+    source_graph: ChatGPTSource | None = None
+
     def to_raw_markdown(self) -> str:
         """Render this conversation as the raw-vault markdown body (no frontmatter).
 
         Frontmatter is added by dual_write.py, which knows the storage location.
         """
+        if self.source_graph is not None:
+            return f"# {self.title}\n\n" + self.source_graph.to_markdown()
         lines: list[str] = [f"# {self.title}", ""]
         if self.source_url:
-            lines.extend([f"Source: {self.source_url}", "Capture scope: visible browser thread", ""])
+            lines.extend(
+                [f"Source: {self.source_url}", "Capture scope: visible browser thread", ""]
+            )
         for m in self.messages:
             lines.append(f"**{m.sender}** · {m.created_at}")
             lines.append("")
