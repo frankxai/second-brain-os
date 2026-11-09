@@ -54,26 +54,25 @@ Installed via `@frankx/second-brain-pro` npm package on purchase. Not in this OS
 
 ## Operational Execution Layer & Rituals
 
-### The 4-Step Alina Pak Ingestion Cycle
+### The 4-Step Ingestion Cycle
 All raw notes and incoming signals follow:
-1. **Drop**: Unfiltered raw capture into `_inbox/` with zero cognitive friction.
-2. **Extract**: Semantic atomic distillation into notes with explicit tags and references.
-3. **Direct**: Connect to projects, people, businesses, or decision trees.
-4. **Automate**: Feed downstream multi-agent actions (pattern-detector, content engine, vault-miner).
+1. **Drop**: Unfiltered raw capture into `brain/_inbox/` with zero cognitive friction.
+2. **Extract**: Semantic atomic distillation into `brain/notes/` with explicit tags and references (`sbo-distill`).
+3. **Direct**: Connect to `brain/projects/`, `brain/people/`, or decision notes.
+4. **Automate**: Run the OSS starter agents (`people-map`, `pattern-detector`) or optional paid-tier agents (`@frankx/second-brain-pro`).
 
 ### Ritual Cadence
-- **Daily**: Git health sync, triage `_inbox/` into wiki-style atomic markdown.
-- **Weekly**: Run `pattern-detector` and `content-engine-integration`.
-- **Monthly**: Run `vault-miner.py` and publish summary report to `_meta/decisions-history.md`.
-- **Quarterly**: Run psychometrics baseline updates (`big-5`, `16p`, `stp`, `ikigai`).
+- **Daily (OSS)**: Git health sync; run `sbo-distill` to triage `brain/_inbox/` into atomic notes.
+- **Weekly (OSS)**: Run `people-map` (`/people-update`) and `pattern-detector` (`/patterns-detect`).
+- **Monthly (Paid tier — `@frankx/second-brain-pro`)**: Run `business-map`, `decision-history-miner` (publishes to `_meta/decisions-history.md`), and `big5-inferer`.
+- **Quarterly (Paid tier — `@frankx/second-brain-pro`)**: Run psychometric (`16p-mapper`, `stp-mapper`, `enneagram-analyzer`) and values (`ikigai-extractor`) baseline updates.
 
-## Multi-Agent Ecosystem Alignment
+## Planned Multi-Agent Ecosystem Integrations (Roadmap)
 
-- **SIS (Layer 0 Substrate)**: Consumes and syncs memory across the 6 core vaults (`Strategic ◆`, `Technical ⬡`, `Creative ✦`, `Operational ▸`, `Wisdom ◎`, `Horizon ↗`).
-- **ruflow / claude-flow v3**: Swarm routing and RuVector embedding memory bus streaming.
-- **oh-my-openagent (OmO)**: Parallel role delegation and multi-harness dispatch.
-- **Hermes Agent**: Autonomous cron-scheduled maintenance and deep multi-source synthesis with provenance.
-- **OpenClaw**: Sovereign security boundary and cryptographic attestation.
+The following ecosystem integrations live in separate Starlight repositories and are planned opt-in bridges rather than bundled dependencies of this OSS template:
+- **SIS (Layer 0 Substrate)**: Optional cross-vault sync with the 6 core Starlight vaults (`Strategic ◆`, `Technical ⬡`, `Creative ✦`, `Operational ▸`, `Wisdom ◎`, `Horizon ↗`).
+- **Hermes Agent**: Optional cron-scheduled maintenance and multi-source synthesis with provenance.
+- **OpenClaw**: Optional sovereign security boundary and cryptographic attestation.
 
 ## Built on SIP
 
@@ -85,9 +84,11 @@ analyzed_at: YYYY-MM-DD
 sources: Second Brain vault artifacts
 ```
 
+Validity disclosures are non-removable.
+
 ## Design Taste Kernel
 
-For any site, app, landing page, dashboard, visual identity, brand, motion, media, social, or frontend task, apply the shared Design Taste Kernel (`starlight-design-intelligence`) before handoff:
+For any site, app, landing page, dashboard, visual identity, brand, motion, media, social, or frontend task, apply the shared Design Taste Kernel (`design-agent-standards`) before handoff:
 
 - `DESIGN_TASTE.md`
 - `WEB_EXPERIENCE_STANDARD.md`
