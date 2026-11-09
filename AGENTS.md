@@ -1,6 +1,6 @@
 ---
 name: second-brain-os
-updated: 2026-07-16
+updated: 2026-11-09
 tags: [agent-contracts, cron, execution, multi-agent]
 source: Activation Sprint + Multi-Agent Alignment
 ---
@@ -87,12 +87,12 @@ sources: Second Brain vault artifacts
 
 ## Design Taste Kernel
 
-For any site, app, landing page, dashboard, visual identity, brand, motion, media, social, or frontend task, apply the shared Design Taste Kernel before handoff:
+For any site, app, landing page, dashboard, visual identity, brand, motion, media, social, or frontend task, apply the shared Design Taste Kernel (`starlight-design-intelligence`) before handoff:
 
-- `C:\Users\frank\starlight\repos\DESIGN_TASTE.md`
-- `C:\Users\frank\starlight\repos\WEB_EXPERIENCE_STANDARD.md`
-- `C:\Users\frank\starlight\repos\MOTION_TASTE_RUBRIC.md`
-- `C:\Users\frank\starlight\repos\MULTI_AGENT_DESIGN_COUNCIL.md`
-- `C:\Users\frank\starlight\repos\VISUAL_QA_GATE.md`
+- `DESIGN_TASTE.md`
+- `WEB_EXPERIENCE_STANDARD.md`
+- `MOTION_TASTE_RUBRIC.md`
+- `MULTI_AGENT_DESIGN_COUNCIL.md`
+- `VISUAL_QA_GATE.md`
 
 When motion, scroll, generated media, GIF/video, or premium polish matters, route through the Motion Design Studio plugin/skills and verify the result visually.
