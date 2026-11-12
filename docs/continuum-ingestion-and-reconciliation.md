@@ -247,3 +247,64 @@ replays avoided), review effort (measured operator minutes), recovery rate
 attempt costs/accepted outcomes). Empty denominators yield unknown, never zero
 cost or 100% coverage. This is an implementation proposal against existing owners,
 not a newly commissioned UI build or a running reconciliation worker.
+
+## Artifact index · 12 November 2026
+
+This slice adds a private index of the binary files a ChatGPT export references.
+It extends the source-intake owner above. It adds no database, service, watcher,
+schedule or browser capture, and it does not change `sbo.chatgpt-source.v1`,
+`sbo.chatgpt-import.v1`, either vault's existing notes or the brain vault.
+
+`sbo.chatgpt-artifacts.v1` is written per conversation source revision and export,
+content-addressed at `_distill/chatgpt/artifacts/<identity-hash>/<sha256>.json`.
+It lists each referenced provider file ID once, with every place the conversation
+refers to it as an RFC 6901 reference into the preserved source envelope, the
+branch state of each reference (`true`, `false`, or `null` when selection is
+unknown), and one of seven outcomes for the file itself:
+
+| Outcome | Meaning |
+| --- | --- |
+| `in-export` | one ZIP member (or byte-identical members) carries the ID; member, size, SHA-256 and sniffed media type are recorded |
+| `missing-from-export` | the conversation references the ID and the ZIP has no such member |
+| `ambiguous` | members with different bytes carry the ID; candidates are listed and none is selected |
+| `unreadable` | the member failed decompression, CRC or decryption |
+| `not-hashed-oversize` | the declared size exceeds the hashing limit; the member is listed and not read |
+| `export-has-no-binaries` | the import was a bare `conversations.json` |
+| `unrecognized-pointer` | the pointer carries no file ID this version can read; the raw pointer is kept |
+
+Files are addressed as export hash plus member name and verified by member hash.
+The preserved ZIP remains the only copy; extraction stays out of the importer.
+Generation prompts and message text are not copied into the manifest; they stay
+behind the reference in the source envelope. Each file carries
+`governance: {status: captured, approved_for_reuse: false}`. Promotion to a design
+registry, a canon authority or public storage is a separate reviewed step with its
+own owner. This index neither performs nor implies it.
+
+`sbo.chatgpt-artifact-receipt.v1` is written per import batch at
+`_distill/chatgpt/artifact-receipts/<scope-hash>/<batch>/<sha256>.json`: conversations
+scanned, files referenced, the count for each outcome, files in the ZIP that no
+conversation references, and an explicit `unknown` list. `sbo-artifacts
+--private-root …` prints it. Both documents are deterministic, so an identical
+replay writes no new bytes. A later export that ships a previously missing file
+adds a second manifest for the same source revision; the earlier one is retained.
+A `detector` integer separates receipts produced by different detection versions.
+
+File-ID and member-name conventions (`sediment://` and `file-service://` pointers,
+`file-…`/`file_…` member prefixes, `conversation_asset_file_names.json`,
+`metadata.attachments`, `aggregate_result.messages[].image_url`) were checked
+against the MIT-licensed reference reader
+[`Gusarovv/chatgpt-export-viewer`](https://github.com/Gusarovv/chatgpt-export-viewer)
+at `9e531871f1253b6eb2345587aac149608fac6c1f`. That code was read, not vendored or
+executed. The provider can change these conventions without notice; unknown shapes
+are recorded as `unknown` or `unrecognized-pointer`, never dropped.
+
+Verified here with synthetic ZIPs only: shipped, missing, duplicated, conflicting,
+corrupt and oversize members; abandoned-branch and unknown-branch references; bare
+JSON imports; identical replay; tampered receipts; and absence of any manifest,
+pointer or file byte in the brain vault. Not verified: a real export, and therefore
+real coverage rates. Not implemented: nested Privacy Portal archives (the importer
+still requires conversation members at the ZIP root), `export_manifest.json` shard
+lists, rendered or interactive capture, Canvas documents, tombstone propagation to
+manifests, and any upload of originals outside the private vault. Rendered and
+interactive states belong to the bounded visible-view capture lane, joined to this
+index by provider conversation and message ID under the join rules above.

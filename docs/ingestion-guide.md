@@ -69,6 +69,31 @@ atomic replace, while an existing brain note with the same conversation ID is ke
 The lookup covers promoted notes across the brain vault, and the summary path is
 identity-addressed, so moves or title changes do not fork a second note.
 
+### Images and files in the export
+
+A ChatGPT export references images, uploads and tool-output files by provider file
+ID, and regularly leaves some of those files out of the ZIP. During a ZIP import
+each referenced file is matched against the archive and recorded in a private
+manifest under `private/_distill/chatgpt/artifacts/`:
+
+- a file the ZIP contains gets its member name, size, SHA-256 and a media type read
+  from its leading bytes;
+- a file the ZIP does not contain is recorded as `missing-from-export`;
+- two different files under one ID are recorded as `ambiguous`, and neither is chosen;
+- a plain `conversations.json` import records every file as `export-has-no-binaries`.
+
+The files stay inside the preserved ZIP. Nothing is extracted, and no manifest,
+file name or pointer is written to the brain vault. To see what an export covered:
+
+```bash
+sbo-artifacts --private-root /path/to/private
+```
+
+The report prints counts and conversation IDs only. A manifest records that a file
+was captured; it never approves the file for reuse or publication. Rendered
+screenshots, interactive states and Canvas documents are not in the manifest,
+because the official export does not carry them.
+
 ## What happens during ingest
 
 For each conversation:

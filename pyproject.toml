@@ -26,6 +26,7 @@ dev = [
 [project.scripts]
 sbo-ingest = "sbo_ingestion.ingest:cli"
 sbo-distill = "sbo_ingestion.distill:cli"
+sbo-artifacts = "sbo_ingestion.chatgpt_artifacts:cli"
 
 [build-system]
 requires = ["hatchling"]

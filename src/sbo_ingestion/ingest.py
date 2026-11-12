@@ -34,7 +34,7 @@ import frontmatter
 from anthropic import AnthropicError
 from yaml import YAMLError
 
-from sbo_ingestion import audit, chatgpt_archive
+from sbo_ingestion import audit, chatgpt_archive, chatgpt_artifacts
 from sbo_ingestion.dual_write import (
     DualWriteResult,
     _assert_descendant,
@@ -451,6 +451,8 @@ def _ingest_file_unlocked(
         raise ValueError(f"Unsupported format: {fmt}")
 
     source_name = source_name or export_path.name
+    export_assets = chatgpt_artifacts.ExportAssets(export_path) if fmt == "chatgpt" else None
+    artifact_records = []
     records = []
     results: list[DualWriteResult] = []
     index_convos = []
@@ -524,6 +526,10 @@ def _ingest_file_unlocked(
                     "refresh_pending": result.brain_preserved and result.source_revised,
                 }
             )
+            if export_assets is not None:
+                artifact = chatgpt_artifacts.preserve_manifest(graph, export_assets, private_root)
+                if artifact is not None:
+                    artifact_records.append(artifact)
         # Keep only index metadata. Message bodies may be gigabytes across a full
         # export and have already been written to the private vault.
         index_convos.append(replace(convo, messages=(), source_graph=None))
@@ -546,6 +552,14 @@ def _ingest_file_unlocked(
             source_name=source_name,
             members=selected_members,
             records=records,
+        )
+        chatgpt_artifacts.write_receipt(
+            private_root,
+            batch=batch,
+            account_scope=account_scope,
+            export=export_assets,
+            scanned=len(records),
+            records=artifact_records,
         )
     if any(not r.source_unchanged for r in results) or not results:
         audit.record_import_receipt(
