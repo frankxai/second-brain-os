@@ -21,7 +21,7 @@ The code lives in one Python package, `sbo_ingestion`, plus a set of agent comma
 
 **Import.** `sbo-ingest` parses an export and writes two files per conversation:
 
-- the full transcript to `private/chat-history/{platform}/`
+- the transcript to `private/chat-history/{platform}/`. For a ChatGPT export with edited prompts or regenerated answers, this file holds only the selected branch (or a branch-selection warning when no `current_node` is set); the complete message graph is kept separately under `private/_distill/chatgpt/sources/`, which `/distill-inbox` does not read
 - a stub with `status: needs-summary` to `brain/_inbox/{platform}/`
 
 It also regenerates `brain/_inbox/{platform}/_INDEX.md`, appends a line per conversation to `private/_distill/audit.jsonl`, and writes an import receipt under `private/_distill/imports/`.
@@ -29,7 +29,7 @@ It also regenerates `brain/_inbox/{platform}/_INDEX.md`, appends a line per conv
 | Input | Handler |
 |---|---|
 | Claude.ai `conversations.json` or `.jsonl` | `handlers/claude_ai.py` |
-| Claude.ai `memories.json` | `handlers/memories.py` |
+| Claude.ai `memories.json`, as a companion file only: picked up automatically when it sits next to `conversations.json`, or passed with `--memories`. It cannot be the positional input | `handlers/memories.py` |
 | ChatGPT `conversations.json`, numbered shards, or the export ZIP as downloaded | `handlers/chatgpt.py` |
 | Kura browser captures (`conversation.md`) | `handlers/kura.py` |
 | Single idea-capture JSON packets | `handlers/idea_capture.py` |
@@ -155,6 +155,8 @@ What the split is meant to prevent: an MCP tool or plugin reaching private conte
 What it leaves open:
 
 - `/distill-inbox` reads the private vault on purpose, one conversation at a time, through the path each stub names. You consent to that when you invoke it, and each completed read is recorded in `private/_distill/audit.jsonl`.
+- A Claude `memories.json` companion is copied into `brain/_inbox/{platform}/_memory-export.md` during an ordinary import, with no distillation or consent step.
+- When an export carries its own per-conversation summary, that summary is copied into the stub frontmatter and `_INDEX.md`. `SBO_TITLE_POLICY=redacted` does not change either of these two copies.
 - Conversation titles are copied into the brain vault by default, as stub headings and as rows in `_INDEX.md`. Set `SBO_TITLE_POLICY=redacted` before importing to use an opaque token there instead; the real title stays in the private copy.
 - OS search indexing, cloud sync, system backups, Obsidian Sync, LLM plugins installed in the private vault, and clipboard history are outside what the code controls.
 
