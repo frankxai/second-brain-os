@@ -11,10 +11,9 @@ from __future__ import annotations
 
 import json
 import re
-import zlib
 from hashlib import sha256
 from pathlib import Path, PurePosixPath
-from zipfile import BadZipFile, ZipFile
+from zipfile import ZipFile, ZipInfo
 
 import click
 
@@ -95,32 +94,47 @@ def sniff_media_type(head: bytes) -> str | None:
 
 
 class ExportAssets:
-    """Asset members of one export, hashed in place and never extracted."""
+    """Asset members of one export, hashed in place and never extracted.
+
+    Use it as a context manager. The archive is opened once, and every hash in
+    the import reads through that one handle, so cost stays linear in the
+    number of members.
+    """
 
     def __init__(self, export: Path):
         self.export = export
         self.is_zip = export.suffix.lower() == ".zip"
         self.referenced: set[str] = set()
-        self._members: dict[str, list[str]] = {}
+        self._archive: ZipFile | None = None
+        # An entry is its position in the central directory, not its name:
+        # two entries may share a name and still hold different bytes.
+        self._entries: dict[str, list[tuple[int, ZipInfo]]] = {}
         self._names: dict[str, str] = {}
-        self._hashed: dict[str, dict] = {}
-        if not self.is_zip:
-            return
-        with ZipFile(export) as archive:
-            for info in archive.infolist():
+        self._hashed: dict[int, dict] = {}
+
+    def __enter__(self) -> ExportAssets:
+        if self.is_zip:
+            self._archive = ZipFile(self.export)
+            for entry, info in enumerate(self._archive.infolist()):
                 if info.is_dir():
                     continue
                 base = PurePosixPath(info.filename).name
                 match = _ASSET_ID.match(base)
                 if match:
-                    self._members.setdefault(match.group(0), []).append(info.filename)
+                    self._entries.setdefault(match.group(0), []).append((entry, info))
                 elif base == _ASSET_NAMES and info.file_size <= _MAX_NAMES_BYTES:
-                    self._load_names(archive, info.filename)
+                    self._load_names(info)
+        return self
 
-    def _load_names(self, archive: ZipFile, member: str) -> None:
+    def __exit__(self, *_: object) -> None:
+        if self._archive is not None:
+            self._archive.close()
+            self._archive = None
+
+    def _load_names(self, info: ZipInfo) -> None:
         try:
-            found = json.loads(archive.read(member))
-        except (ValueError, OSError, RuntimeError, NotImplementedError, BadZipFile, zlib.error):
+            found = json.loads(self._archive.read(info))
+        except Exception:  # an unreadable name map only loses display names
             return
         if isinstance(found, dict):
             self._names.update(
@@ -131,37 +145,37 @@ class ExportAssets:
 
     @property
     def asset_ids(self) -> frozenset[str]:
-        return frozenset(self._members)
+        return frozenset(self._entries)
 
-    def _hash(self, members: list[str]) -> None:
-        pending = [name for name in members if name not in self._hashed]
-        if not pending:
-            return
-        with ZipFile(self.export) as archive:
-            for name in pending:
-                info = archive.getinfo(name)
-                if info.file_size > MAX_HASH_BYTES:
-                    self._hashed[name] = {"status": "not-hashed-oversize"}
-                    continue
-                digest = sha256()
-                head = b""
-                size = 0
-                try:
-                    with archive.open(info) as handle:
-                        while chunk := handle.read(1024 * 1024):
-                            if not head:
-                                head = chunk[:16]
-                            digest.update(chunk)
-                            size += len(chunk)
-                except (OSError, RuntimeError, NotImplementedError, BadZipFile, zlib.error):
-                    self._hashed[name] = {"status": "unreadable"}
-                    continue
-                self._hashed[name] = {
+    def _hash(self, entry: int, info: ZipInfo) -> dict:
+        if entry in self._hashed:
+            return self._hashed[entry]
+        if info.file_size > MAX_HASH_BYTES:
+            result = {"status": "not-hashed-oversize"}
+        else:
+            digest = sha256()
+            head = b""
+            size = 0
+            try:
+                with self._archive.open(info) as handle:
+                    while chunk := handle.read(1024 * 1024):
+                        if not head:
+                            head = chunk[:16]
+                        digest.update(chunk)
+                        size += len(chunk)
+                result = {
                     "status": "in-export",
                     "sha256": digest.hexdigest(),
                     "size_bytes": size,
                     "sniffed_media_type": sniff_media_type(head),
                 }
+            except Exception:
+                # These are untrusted archive bytes. Whatever the decoder raises
+                # (zlib, bz2, lzma, a codec added later, a bad CRC, truncation,
+                # encryption), one damaged member is recorded and the import goes on.
+                result = {"status": "unreadable"}
+        self._hashed[entry] = result
+        return result
 
     def _original_name(self, asset_id: str, member: str) -> str | None:
         base = PurePosixPath(member).name
@@ -175,20 +189,27 @@ class ExportAssets:
         self.referenced.add(asset_id)
         if not self.is_zip:
             return {"status": "export-has-no-binaries"}
-        members = sorted(set(self._members.get(asset_id, ())))
-        if not members:
+        if self._archive is None:
+            raise RuntimeError("ExportAssets must be entered before it resolves files")
+        entries = sorted(
+            self._entries.get(asset_id, ()), key=lambda item: (item[1].filename, item[0])
+        )
+        if not entries:
             return {"status": "missing-from-export"}
-        self._hash(members)
-        found = [{"member": name, **self._hashed[name]} for name in members]
+        found = [
+            {"member": info.filename, "entry": entry, **self._hash(entry, info)}
+            for entry, info in entries
+        ]
+        members = [item["member"] for item in found]
         for wanted in ("unreadable", "not-hashed-oversize"):
             if any(item["status"] == wanted for item in found):
                 return {"status": wanted, "members": members}
         if len({item["sha256"] for item in found}) > 1:
-            # Two different files claim one ID. Selecting either would be a guess.
+            # Different files claim one ID. Selecting either would be a guess.
             return {
                 "status": "ambiguous",
                 "candidates": [
-                    {key: item[key] for key in ("member", "sha256", "size_bytes")}
+                    {key: item[key] for key in ("member", "entry", "sha256", "size_bytes")}
                     for item in found
                 ],
             }

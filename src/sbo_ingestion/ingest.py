@@ -382,15 +382,17 @@ def _ingest_file(
     with audit.exclusive_lock(lock):
         snapshot, batch = chatgpt_archive.preserve_export(export_path, private_root)
         kwargs["memories_path"] = _find_memories(export_path, kwargs.get("memories_path"))
-        return _ingest_file_unlocked(
-            snapshot,
-            brain_root=brain_root,
-            private_root=private_root,
-            account_scope=account_scope,
-            source_name=export_path.name,
-            batch=batch,
-            **kwargs,
-        )
+        with chatgpt_artifacts.ExportAssets(snapshot) as export_assets:
+            return _ingest_file_unlocked(
+                snapshot,
+                brain_root=brain_root,
+                private_root=private_root,
+                account_scope=account_scope,
+                source_name=export_path.name,
+                batch=batch,
+                export_assets=export_assets,
+                **kwargs,
+            )
 
 
 def _ingest_file_unlocked(
@@ -406,6 +408,7 @@ def _ingest_file_unlocked(
     account_scope: str | None = None,
     source_name: str | None = None,
     batch: str = "",
+    export_assets: chatgpt_artifacts.ExportAssets | None = None,
 ) -> list[DualWriteResult]:
     """Ingest a single export file with an already-resolved mode."""
     normalized_fmt = format.lower().replace("_", "-") if format else None
@@ -451,7 +454,6 @@ def _ingest_file_unlocked(
         raise ValueError(f"Unsupported format: {fmt}")
 
     source_name = source_name or export_path.name
-    export_assets = chatgpt_artifacts.ExportAssets(export_path) if fmt == "chatgpt" else None
     artifact_records = []
     records = []
     results: list[DualWriteResult] = []
@@ -553,14 +555,15 @@ def _ingest_file_unlocked(
             members=selected_members,
             records=records,
         )
-        chatgpt_artifacts.write_receipt(
-            private_root,
-            batch=batch,
-            account_scope=account_scope,
-            export=export_assets,
-            scanned=len(records),
-            records=artifact_records,
-        )
+        if export_assets is not None:
+            chatgpt_artifacts.write_receipt(
+                private_root,
+                batch=batch,
+                account_scope=account_scope,
+                export=export_assets,
+                scanned=len(records),
+                records=artifact_records,
+            )
     if any(not r.source_unchanged for r in results) or not results:
         audit.record_import_receipt(
             private_root,

@@ -266,13 +266,15 @@ unknown), and one of seven outcomes for the file itself:
 | --- | --- |
 | `in-export` | one ZIP member (or byte-identical members) carries the ID; member, size, SHA-256 and sniffed media type are recorded |
 | `missing-from-export` | the conversation references the ID and the ZIP has no such member |
-| `ambiguous` | members with different bytes carry the ID; candidates are listed and none is selected |
-| `unreadable` | the member failed decompression, CRC or decryption |
+| `ambiguous` | entries with different bytes carry the ID, including two entries that share one name; each candidate is listed with its position in the archive and none is selected |
+| `unreadable` | the member could not be decoded, whatever the decoder raised: a damaged stream, a bad CRC, truncation or encryption. The conversation import continues |
 | `not-hashed-oversize` | the declared size exceeds the hashing limit; the member is listed and not read |
 | `export-has-no-binaries` | the import was a bare `conversations.json` |
 | `unrecognized-pointer` | the pointer carries no file ID this version can read; the raw pointer is kept |
 
 Files are addressed as export hash plus member name and verified by member hash.
+The archive is opened once per import and every hash reads through that handle, so
+the cost is linear in the number of members.
 The preserved ZIP remains the only copy; extraction stays out of the importer.
 Generation prompts and message text are not copied into the manifest; they stay
 behind the reference in the source envelope. Each file carries

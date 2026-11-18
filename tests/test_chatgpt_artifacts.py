@@ -1,9 +1,10 @@
 """Artifact index over synthetic exports: no account data, no provider calls."""
 
 import json
+import warnings
 from hashlib import sha256
 from pathlib import Path
-from zipfile import ZIP_STORED, ZipFile
+from zipfile import ZIP_LZMA, ZIP_STORED, ZipFile
 
 import pytest
 from click.testing import CliRunner
@@ -350,6 +351,58 @@ def test_corrupt_member_is_reported_without_blocking_the_import(visual_zip, tmp_
     assert assets["file_00aa11"]["original"]["status"] == "in-export"
 
 
+def test_entries_sharing_one_name_with_different_bytes_are_ambiguous(tmp_path):
+    source = tmp_path / "export.zip"
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)  # zipfile warns on the duplicate name
+        with ZipFile(source, "w", ZIP_STORED) as archive:
+            archive.writestr("conversations.json", json.dumps([conversation()]))
+            archive.writestr("file_00aa11.dat", PNG)
+            archive.writestr("file_00aa11.dat", PLOT)
+    original = assets_by_id(next(parse_and_build(source, tmp_path)))["file_00aa11"]["original"]
+    assert original["status"] == "ambiguous"
+    assert "sha256" not in original and "member" not in original
+    assert [c["member"] for c in original["candidates"]] == ["file_00aa11.dat"] * 2
+    assert [c["entry"] for c in original["candidates"]] == [1, 2]
+    assert [c["sha256"] for c in original["candidates"]] == [
+        sha256(PNG).hexdigest(),
+        sha256(PLOT).hexdigest(),
+    ]
+
+
+def test_corrupt_lzma_member_is_unreadable_and_the_import_continues(tmp_path):
+    source = tmp_path / "export.zip"
+    target = "file-Plot44-plot.png"
+    with ZipFile(source, "w", ZIP_STORED) as archive:
+        archive.writestr("conversations.json", json.dumps([conversation(), text_only()]))
+        for name, data in MEMBERS.items():
+            kind = ZIP_LZMA if name == target else ZIP_STORED
+            archive.writestr(name, data * 40 if name == target else data, compress_type=kind)
+        info = archive.getinfo(target)
+    data = bytearray(source.read_bytes())
+    # One flipped byte in the middle of the compressed stream: an LZMA decode error.
+    data[info.header_offset + 30 + len(target) + info.compress_size // 2] ^= 0xFF
+    source.write_bytes(bytes(data))
+    assert len(run(source, tmp_path)) == 2
+    assets = assets_by_id(manifests(tmp_path)[0])
+    assert assets["file-Plot44"]["original"] == {"status": "unreadable", "members": [target]}
+    assert assets["file_00aa11"]["original"]["status"] == "in-export"
+    assert len(chatgpt_artifacts.load_receipts(tmp_path / "private")) == 1
+
+
+def test_the_archive_is_opened_once_for_a_whole_import(visual_zip, tmp_path, monkeypatch):
+    opened = []
+
+    class Counting(chatgpt_artifacts.ZipFile):
+        def __init__(self, *args, **kwargs):
+            opened.append(args)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(chatgpt_artifacts, "ZipFile", Counting)
+    run(visual_zip, tmp_path)
+    assert len(opened) == 1
+
+
 def test_oversize_member_is_listed_without_being_read(visual_zip, tmp_path, monkeypatch):
     monkeypatch.setattr(chatgpt_artifacts, "MAX_HASH_BYTES", len(PDF) - 1)
     original = assets_by_id(next(parse_and_build(visual_zip, tmp_path)))["file-Doc55"]["original"]
@@ -426,6 +479,8 @@ def test_report_command_on_a_vault_without_imports(tmp_path):
 
 
 def parse_and_build(source: Path, tmp_path: Path):
-    export = chatgpt_artifacts.ExportAssets(source)
-    for convo in parse_export(source, account_scope="synthetic"):
-        yield chatgpt_artifacts.build_manifest(convo.source_graph, export, tmp_path / "private")
+    with chatgpt_artifacts.ExportAssets(source) as export:
+        for convo in parse_export(source, account_scope="synthetic"):
+            yield chatgpt_artifacts.build_manifest(
+                convo.source_graph, export, tmp_path / "private"
+            )
