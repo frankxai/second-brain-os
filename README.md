@@ -1,266 +1,241 @@
-<p align="center">
-  <img src=".github/assets/hero.svg" width="100%" alt="Second Brain OS — Persistent memory · Cross-session knowledge · Personal intelligence layer"/>
-</p>
-
 # Second Brain OS
 
-Kura browser captures now use the existing two-vault ingestion pipeline. See
-[capture and automation SOP](docs/automation.md) for supported inputs, repeat
-processing and source-change review.
+Second Brain OS (SBO) is a template for a two-vault Obsidian setup: a Python CLI imports your Claude.ai and ChatGPT exports, keeps the raw conversations in a private vault, and puts summary stubs in a second vault that your coding agent can read and distill into notes.
 
-> An Obsidian second brain that reflects on its own corpus, cites everything it claims, and refuses to trust its own synthesis until an adversarial pass verifies it. Two vaults, and an append-only log of every crossing between them. Coding-agent-native — the compute is the session you already pay for.
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Built on SIP](https://img.shields.io/badge/Built%20on-SIP%20v1.1.1-blue.svg)](https://github.com/frankxai/Starlight-Intelligence-System)
 [![Tests](https://github.com/frankxai/second-brain-os/actions/workflows/test.yml/badge.svg)](https://github.com/frankxai/second-brain-os/actions/workflows/test.yml)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 
-**Status:** v0.3.0 — proactive reflection engine + hard VERIFY gate.
+Package version 0.3.1 (`pyproject.toml`). MIT licensed. Python 3.11 or newer.
 
----
+## Who it is for
 
-## What this is
+- You keep notes in Obsidian, or are willing to.
+- You have a history of AI conversations you want to search and reuse, and you can request an export from Claude.ai or ChatGPT.
+- You already work in a coding agent such as Claude Code, and you are comfortable running a few terminal commands.
+- You want raw chat history kept apart from the notes an LLM can browse.
 
-A bootable template for a working AI-augmented, two-vault Obsidian system. It ingests your AI chat exports, distills them into atomic notes, and — new in v0.3.0 — runs a scheduled reflection pass that asks questions of your own corpus and refuses to write an answer down until it's cited and adversarially checked. Retrieval is table stakes. The thing every other tool in this space skips is trustworthy synthesis you didn't ask for.
+SBO is a template. You clone it, run a setup script that copies two vault skeletons to your disk, and own the result from there. `CONTRIBUTING.md` puts the aim as staying "small, opinionated, and honest about its limits". There is no hosted service, no account, and no plugin API to build against.
 
-- **`brain/` vault** — MCP-wired. Your LLM (Claude Desktop, Claude Code, etc.) reads + writes here. Publishable.
-- **`private/` vault** — no MCP server points here, so nothing an LLM browses reaches it. The one exception is deliberate: `/distill-inbox` reads a raw conversation when you invoke it, through the pointer its stub names. Sensitive content lives here permanently.
+## What it does
 
-## Why this beats the field
+The code lives in one Python package, `sbo_ingestion`, plus a set of agent commands written as markdown.
 
-Every row below is a structural gap, not a missing checkbox — see [`docs/reflection-engine.md`](docs/reflection-engine.md#honest-differentiation) for the full comparison and why each gap is architectural.
+**Import.** `sbo-ingest` parses an export and writes two files per conversation:
 
-| | This (SBO) | BASB (Tiago Forte) | Mem0 | Zep / Graphiti | Letta / MemGPT | Plain Obsidian + AI plugin |
-|---|---|---|---|---|---|---|
-| **Proactive reflection** | Yes — scheduled `/reflect` asks questions of the corpus unprompted | No — human runs Capture→Organize→Distill→Express by hand | No — extract-and-store only, no synthesis | No — recall is excellent, but on-demand | Partial — sleep-time agent compresses/merges, doesn't originate questions | No |
-| **Sovereign / local** | Yes — local vault, local embeddings, nothing leaves the machine unless you export it | N/A (a methodology, not software) | No — managed cloud by default | Usually managed / hosted | Managed runtime | Yes, but no synthesis layer to be sovereign about |
-| **Cited-lens honesty** | Every reflection carries `{source_path, anchor}` and is framed as a lens, not a verdict | N/A | No — facts stored, not framed | No — graph recall, not framed synthesis | No — merges without citation | No |
-| **Adversarial verify** | Yes — distinct critic pass, 4 hard checks, failing candidates are dropped and logged | No | No | No | No | No |
-| **Privacy: two-vault split** | Yes — filesystem boundary, MCP physically cannot resolve `private/` | N/A | No — one store | No — one graph | No — one memory store | No — one vault, AI plugin sees everything |
+- the transcript to `private/chat-history/{platform}/`. For a ChatGPT export with edited prompts or regenerated answers, this file holds only the selected branch (or a branch-selection warning when no `current_node` is set); the complete message graph is kept separately under `private/_distill/chatgpt/sources/`, which `/distill-inbox` does not read
+- a stub with `status: needs-summary` to `brain/_inbox/{platform}/`
 
-## Proven at scale
+It also regenerates `brain/_inbox/{platform}/_INDEX.md`, appends a line per conversation to `private/_distill/audit.jsonl`, and writes an import receipt under `private/_distill/imports/`.
 
-Built-in-public receipts, scale stats only:
+| Input | Handler |
+|---|---|
+| Claude.ai `conversations.json` or `.jsonl` | `handlers/claude_ai.py` |
+| Claude.ai `memories.json`, as a companion file only: picked up automatically when it sits next to `conversations.json`, or passed with `--memories`. It cannot be the positional input | `handlers/memories.py` |
+| ChatGPT `conversations.json`, numbered shards, or the export ZIP as downloaded | `handlers/chatgpt.py` |
+| Kura browser captures (`conversation.md`) | `handlers/kura.py` |
+| Single idea-capture JSON packets | `handlers/idea_capture.py` |
 
-- A 2-year Claude.ai export: **1,222 conversations / 11,447 messages** ingested, **0 truncated**.
-- Every conversation's own `summary` field (when the export carries one) is captured into brain frontmatter — new in 0.3, so agents read the AI's own compression instead of re-deriving it.
-- A `memories.json` export (the AI's pre-distilled cross-conversation memory) writes to a dedicated high-signal `_memory-export.md` that downstream agents are told to weight above any single conversation.
-- **7 domain MOCs** generated by a 12-agent, three-tier multi-model swarm (cheap audit → mid-tier build → deepest-tier adversarial verify) — verdict PASS, zero broken wikilinks after the fix pass. See [`docs/swarm-curation.md`](docs/swarm-curation.md).
-- Verified through a **16-tool Obsidian MCP round-trip** — every command in this repo (`/distill-inbox`, `/patterns-detect`, `/people-update`, `/sbo-verify`, `/reflect`) runs against the same wired vault. See [`docs/obsidian-mcp.md`](docs/obsidian-mcp.md).
-- **Test suite** passing, zero-setup (`pytest` works in a fresh clone with no `pip install -e .` — see What's new below).
+Re-running an import refreshes the private copy and keeps an existing brain note for the same conversation, including one you have already moved out of `_inbox/`. ZIP layouts that are ambiguous (mixed legacy and sharded members, duplicate or missing shard numbers, duplicate conversation IDs) stop the import. Values taken from an export are sanitised before they are used in a path (`safe_path.py`).
 
-## 30 minutes to wire.
+**Distill.** The `/distill-inbox` command runs inside your coding agent session. It uses the `sbo-distill` CLI to pick a small batch of stubs, read each raw conversation in size-limited packets, write a summary into the stub, and record the read in the audit log. Stubs carry a `trust: untrusted-data` marker and the command tells the agent to treat imported text as data, never as instructions.
 
-Request your Claude.ai export first — it usually arrives in minutes, longer on a large account, and the **download link expires 24 hours** after it lands. Wire the system while you wait.
+**Ingestion modes.** `sbo-ingest --mode` takes one of three values:
 
-## Quick start
+| Mode | What happens |
+|---|---|
+| `agent` (default) | Writes raw files and stubs. No API call. You fill the stubs later with `/distill-inbox`. |
+| `api` | Summarises through the Anthropic API during import. Paid, and only selected when you pass `--mode api`. Having `ANTHROPIC_API_KEY` set does not switch it on. |
+| `dry-run` | Writes raw files and placeholder stubs that are not queued for distilling. For checking an install. |
+
+**Agent commands.** Five commands ship in `.claude/commands/`. They are prompts that an agent follows, so their output depends on the agent and model you run them with.
+
+| Command | Purpose |
+|---|---|
+| `/distill-inbox` | Fill inbox stubs with summaries |
+| `/people-update` | Refresh `brain/people/` following the `people-map` agent contract |
+| `/patterns-detect` | Write a weekly `brain/patterns/` note following the `pattern-detector` contract |
+| `/reflect` | Draft questions about the brain vault with cited evidence, then drop any that fail the checks in `/sbo-verify` |
+| `/sbo-verify` | Check install health and the privacy scripts |
+
+`docs/cross-ai-portability.md` describes how to run the same prompts from other agents.
+
+**Other modules.** `archive_search.py` builds a lexical search index over the brain vault and never opens the private vault. `native_host.py` is a Chrome native messaging host for Kura captures, with a Windows installer script. `voice_check.py` flags stock AI phrasing in generated summaries.
+
+## Quickstart
+
+These commands were run on Linux with Python 3.11. The trial uses a temporary directory so nothing lands in your home folder until you choose to.
 
 ```bash
 git clone https://github.com/frankxai/second-brain-os
 cd second-brain-os
 
-# Install the ingestion package
-python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -e .
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev]'
 
-# Run setup
-pwsh ./scripts/setup.ps1     # Windows
-./scripts/setup.sh            # macOS / Linux
+sbo-ingest --help
+sbo-distill --help
 ```
 
-See [`docs/getting-started.md`](docs/getting-started.md) for the full walkthrough.
-
-## The pipeline
-
-Nine stages, each grounded in something you can point at on disk. No stage asserts anything that wasn't first retrieved from a real file. Full spec: [`docs/reflection-engine.md`](docs/reflection-engine.md).
-
-```
- 1  CAPTURE      raw signal lands untouched — chat exports, daily notes, drops
-       v
- 2  INGEST       dual-write applies the privacy boundary at the door
-       v              private/  <- raw conversation, memories.json, audit row
-       v              brain/    <- status:needs-summary stub + _INDEX.md corpus map
-       v
- 3  DISTILL      /distill-inbox turns stubs into atomic notes (idea/learning/decision/…)
-       v
- 4  CONNECT      /people-update refreshes _moc/ link-lists + per-person cross-refs
-       v
- 5  REFLECT      *** new in v0.3.0 ***
-       v          /reflect asks 3-5 cited questions of the whole corpus, weekly
-       v
- 6  SURFACE      right memory, right moment — _moc/ + reflection output at session open
-       v
- 7  ACT          highest-confidence verified insight -> content draft or next-action
-       v              (human gates anything that goes external)
-       v
- 8  VERIFY       *** hard gate, new in v0.3.0 ***
-       v          citation-real | contradiction-queued | lens-framed | privacy-safe
-       v          any FAIL drops the candidate — logged, never softened
-       v
- 9  COMPOUND     reflection-log delta tells next week's run which errors to avoid
-```
-
-## The three ingestion modes
-
-`sbo-ingest` has three modes. **Default is `agent` — recommended.**
-
-| Mode | Cost | Compute | When to use |
-|---|---|---|---|
-| `agent` *(default)* | $0 extra | Your coding-agent session | You have Claude Code / ChatGPT / Cursor / Codex / Gemini open. Best quality (agent cross-references your vault). |
-| `api` | ~$0.005/convo on Haiku 4.5 | Anthropic API | Batch automation. No coding-agent session handy. |
-| `dry-run` | $0 | None — stubs only | Smoke-test the install. Verify the dual-write boundary. |
-
-### Default (agent mode) — recommended
+Create a trial pair of vaults and import the sample export from the test fixtures:
 
 ```bash
-sbo-ingest path/to/conversations.jsonl \
-  --brain-root /path/to/brain \
-  --private-root /path/to/private
-# Writes raw to private/, stubs (status: needs-summary) to brain/_inbox/, refreshes _INDEX.md
+TRIAL="$(mktemp -d)"
+bash scripts/setup.sh "$TRIAL/second-brain"
+
+export SBO_BRAIN_VAULT_ROOT="$TRIAL/second-brain/brain"
+export SBO_PRIVATE_VAULT_ROOT="$TRIAL/second-brain/private"
+
+sbo-ingest tests/fixtures/claude-ai-export-sample.jsonl
+sbo-distill list
 ```
 
-ChatGPT exports can be passed as the downloaded ZIP without extracting it:
+`setup.sh` copies the two skeletons, runs the privacy check on the new private vault, and prints the next steps for Obsidian and MCP. It refuses to run if the target already holds a `brain/` or `private/` folder. `sbo-ingest` prints the path of every file it wrote, and `sbo-distill list` prints the stubs that are waiting for a summary as JSON.
+
+Run the tests:
 
 ```bash
-sbo-ingest path/to/chatgpt-export.zip \
-  --brain-root /path/to/brain \
-  --private-root /path/to/private
+pytest
 ```
 
-Both legacy `conversations.json` exports and current numbered
-`conversations-000.json`, `conversations-001.json`, … shards are supported. ZIP
-members are processed one shard at a time to keep peak memory bounded. Ambiguous,
-nested, duplicated, mixed legacy/sharded, and gapped shard layouts fail closed.
-Re-ingestion refreshes private raw sources atomically while preserving existing
-same-conversation brain notes even after they move out of `_inbox/`. Completed runs write private receipts under
-`private/_distill/imports/`.
+When you are ready for a real install, run `bash scripts/setup.sh` with no argument to create the vaults under `~/second-brain`, point the two environment variables there, and pass your own export to `sbo-ingest`. A ChatGPT export can be passed as the ZIP file without extracting it.
 
-If a `memories.json` sits next to the export (or you pass `--memories path/to/memories.json`), it's parsed and written to `brain/_inbox/{platform}/_memory-export.md` automatically — no separate command needed.
+The rest of the setup happens outside the terminal: opening both vaults in Obsidian, installing the community plugins, and connecting an MCP server to the brain vault. Follow [docs/getting-started.md](docs/getting-started.md) and [docs/obsidian-mcp.md](docs/obsidian-mcp.md) for those steps. Windows users get PowerShell equivalents of the scripts in `scripts/`.
 
-Then in Claude Code (or any other coding agent — see [`docs/cross-ai-portability.md`](docs/cross-ai-portability.md)):
+## How it fits together
 
-```
-/distill-inbox
-```
-
-The agent walks every stub, reads the linked raw conversation in `private/`, produces a real summary, writes it back, updates `status: triage`, and logs to `private/_distill/audit.jsonl`. No extra API spend.
-
-### API mode (optional)
-
-```bash
-sbo-ingest path/to/conversations.jsonl \
-  --brain-root /path/to/brain \
-  --private-root /path/to/private \
-  --mode api  # or just set $ANTHROPIC_API_KEY
+```mermaid
+flowchart TD
+    E[Chat export or capture] --> I[sbo-ingest]
+    I --> R[private/chat-history<br/>raw transcripts]
+    I --> S[brain/_inbox<br/>stubs and _INDEX.md]
+    I --> A[private/_distill/audit.jsonl]
+    S --> D["/distill-inbox in a coding agent"]
+    R -. "sbo-distill packet, one conversation at a time" .-> D
+    D --> N[Summary written back to the stub]
+    D --> A
+    N --> C["/people-update, /patterns-detect, /reflect"]
+    C --> O[brain/people and brain/patterns]
+    M[MCP server over Obsidian Local REST API] <--> B[brain vault only]
 ```
 
-### Smoke-test the install
-
-```bash
-sbo-ingest tests/fixtures/claude-ai-export-sample.jsonl \
-  --brain-root /path/to/brain \
-  --private-root /path/to/private \
-  --mode dry-run  # legacy --dry-run flag also works
-```
-
-## What's new in v0.3.0
-
-- **`/reflect`** — the reflection engine (Stage 5 of the pipeline). Weekly: gather the highest-signal 100 notes cheaply (frontmatter only, no per-note LLM call), generate 3-5 cited questions that cross-cut the corpus, synthesize each as a lens (never a verdict), run the VERIFY gate, write survivors to `patterns/{YYYY}-W{ww}-reflection.md`, log a reflection-delta so next week diversifies instead of looping. Spec: [`docs/reflection-engine.md`](docs/reflection-engine.md).
-- **VERIFY hard gate** — `/sbo-verify` gained a reflection mode: four independent checks (citation-real, contradiction-queued-for-human, lens-framing, privacy-safe) run as a distinct critic pass, never the same generation that wrote the candidate. Any single FAIL drops the candidate — it's logged, not softened. Every surviving artifact carries a `sip_attestation` YAML block recording what verified it and when.
-- **`memories.json` + per-conversation summary ingestion** — the export's own pre-distilled cross-conversation memory now lands as a dedicated high-signal `_memory-export.md`, and each conversation's own `summary` field (when present) is captured straight into brain frontmatter instead of being re-derived.
-- **Cross-platform timestamp tolerance** — malformed or out-of-range export timestamps are omitted as metadata instead of aborting an otherwise valid conversation import.
-- **`_INDEX.md` corpus map** — every ingest run regenerates a newest-first `{date, title, summary}` table per platform in `brain/_inbox/{platform}/_INDEX.md`, so an agent (or you) can read the whole corpus shape in one file instead of opening every stub.
-- **Zero-setup tests** — a root-level `conftest.py` puts `src/` on `sys.path`, so `pytest` collects and runs in a fresh clone without `pip install -e .` first (you still need the runtime deps installed — `pip install -e .` remains the one-command way to get those).
-- **[`docs/obsidian-mcp.md`](docs/obsidian-mcp.md)** — full MCP wiring guide: the HTTP-vs-HTTPS gotcha that silently breaks every tool call, the insecure-HTTP-off-by-default toggle, working config for Claude Code/Desktop, and a troubleshooting table.
-
-## What you get
+The vault layout that `setup.sh` creates:
 
 ```
-~/second-brain/
-├── brain/                 # 10 community plugins, MCP-wired, agent-maintained zones
+second-brain/
+├── brain/
 │   ├── _capture.md
-│   ├── _inbox/{claude-ai,chatgpt,manual}/   # status: needs-summary lives here
-│   │   └── _INDEX.md      # newest-first corpus map, regenerated on every ingest
+│   ├── _inbox/{claude-ai,chatgpt,manual}/
 │   ├── notes/{ideas,learnings,decisions}/
 │   ├── projects/
-│   ├── people/            # auto-maintained by people-map agent
-│   ├── patterns/          # weekly pattern-detector output + weekly *-reflection.md
-│   ├── _meta/             # paid-tier psychometrics, businesses, decisions-history
-│   ├── _moc/              # Maps of Content
-│   └── _agents/           # agent prompt contracts
-└── private/               # no MCP points here; read only via /distill-inbox
-    ├── chat-history/{claude-ai,chatgpt}/    # raw conversations, UUID-named
+│   ├── people/
+│   ├── patterns/
+│   ├── _meta/
+│   ├── _moc/
+│   ├── _agents/
+│   └── _archive/
+└── private/
+    ├── chat-history/{claude-ai,chatgpt}/
     ├── journal/
     ├── relationships/
     ├── health/
     ├── finances/
-    └── _distill/
-        ├── audit.jsonl    # append-only ingest + distill log
-        ├── imports/       # completed import receipts (members + counts)
-        └── pending/       # private patterns awaiting promotion to brain
+    └── _distill/pending/
 ```
 
-## Docs
+[docs/architecture.md](docs/architecture.md) explains which folders are written by you, by the ingestion script, and by agents.
 
-| Doc | What |
+## Privacy model
+
+There are two vaults. The **brain vault** is the one you connect to an MCP server, so an LLM can read and write it. The **private vault** holds raw conversations and anything sensitive, and no MCP server is pointed at it.
+
+MCP is never pointed at `private/`. That is a path convention. Nothing in the kernel enforces it: there is no separate uid, container, or mount namespace, and a coding agent with shell access can read either tree.
+
+What the split is meant to prevent: an MCP tool or plugin reaching private content, a retrieval tool pointed at the wrong root, and publishing the brain vault with raw history inside it.
+
+What it leaves open:
+
+- `/distill-inbox` reads the private vault on purpose, one conversation at a time, through the path each stub names. You consent to that when you invoke it, and each completed read is recorded in `private/_distill/audit.jsonl`.
+- A Claude `memories.json` companion is copied into `brain/_inbox/{platform}/_memory-export.md` during an ordinary import, with no distillation or consent step.
+- When an export carries its own per-conversation summary, that summary is copied into the stub frontmatter and `_INDEX.md`. `SBO_TITLE_POLICY=redacted` does not change either of these two copies.
+- Conversation titles are copied into the brain vault by default, as stub headings and as rows in `_INDEX.md`. Set `SBO_TITLE_POLICY=redacted` before importing to use an opaque token there instead; the real title stays in the private copy.
+- OS search indexing, cloud sync, system backups, Obsidian Sync, LLM plugins installed in the private vault, and clipboard history are outside what the code controls.
+
+`scripts/verify-privacy.sh` checks the parts a script can check and prints a warning with the manual step for the parts it cannot:
+
+```bash
+bash scripts/verify-privacy.sh "$SBO_PRIVATE_VAULT_ROOT"
+```
+
+Read [docs/privacy-model.md](docs/privacy-model.md) for the threat model and the hardening checklist before you import anything sensitive.
+
+## Configuration
+
+The CLIs read these from the process environment. `.env.example` lists the names; nothing in the package loads a `.env` file for you.
+
+| Variable | Used by |
 |---|---|
-| [Getting Started](docs/getting-started.md) | 30-min wire walkthrough + Day 1 flow |
-| [Ingestion Guide](docs/ingestion-guide.md) | Claude.ai + ChatGPT export workflows + the three modes |
-| [Reflection Engine](docs/reflection-engine.md) | The 9-stage pipeline, REFLECT + VERIFY spec, honest competitor comparison |
-| [Obsidian MCP Setup](docs/obsidian-mcp.md) | Wiring Claude Code/Desktop to your vault + the gotchas that cost hours |
-| [Privacy Model](docs/privacy-model.md) | Threat model + privacy-hardening checklist |
-| [Architecture](docs/architecture.md) | Three edges, two vaults, agent zones |
-| [Composition Guide](docs/composition-guide.md) | Wiring to SIS / Library OS / Chronicle (optional) |
-| [Swarm Curation](docs/swarm-curation.md) | Optional multi-model audit→build→verify pattern for large vaults |
-| [Paid Tier](docs/paid-tier.md) | 8 depth agents (Big 5, 16P, business-map, …) |
-| [Cross-AI Portability](docs/cross-ai-portability.md) | Running `/distill-inbox` + other commands in ChatGPT / Cursor / Codex / Gemini |
+| `SBO_BRAIN_VAULT_ROOT` | Default for `--brain-root` |
+| `SBO_PRIVATE_VAULT_ROOT` | Default for `--private-root` |
+| `ANTHROPIC_API_KEY` | `sbo-ingest --mode api` only |
+| `SBO_TITLE_POLICY` | Title handling in stubs and indexes (`redacted` hides titles) |
+| `SBO_VERIFY_MODE` | `scripts/verify-privacy.*` check set (`strict` or `template`) |
+| `SBO_BANNED_PHRASES_FILE` | Custom phrase list for `voice_check.py` |
+| `SBO_SIS_ROOT`, `SIS_ROOT` | Optional Starlight Intelligence System location for `continuity.py` |
+| `OBSIDIAN_API_KEY`, `OBSIDIAN_HOST`, `OBSIDIAN_PORT` | The Obsidian MCP server, see [docs/obsidian-mcp.md](docs/obsidian-mcp.md) |
 
-## Privacy
+## Project layout
 
-> MCP is never pointed at `private/`. That is a path convention, not a
-> kernel-enforced boundary — there is no separate uid, container, or mount
-> namespace here, and a coding agent with shell access can read either tree.
-
-So be exact about what this defends against: MCP scope creep, a misconfigured plugin, a retrieval tool pointed at the wrong root, and publishing `brain/` by accident. It does **not** defend against the distilling agent itself, which you consciously grant one read per conversation. The audit log exists because the convention can fail.
-
-Coding agents that run `/distill-inbox` read `private/` once per conversation (with your explicit consent the moment you invoke the command), produce the summary, and never copy raw content into `brain/`. The audit log records every read. `/reflect` never reads `private/` at all — if a candidate reflection would need private content to verify, it's dropped and the reason is stated, not silently skipped.
-
-### Titles cross the boundary by default
-
-Filenames are hashed tokens, but the conversation title still lands as a stub's heading and as a row in `_inbox/{platform}/_INDEX.md` — one file listing every conversation you own. On a real 5,311-conversation export those titles named medical, legal, relationship and employer topics, in the vault an LLM reads. A title is often the most revealing line in a conversation.
-
-Titles are also what make an inbox navigable, so this is your call:
-
-```bash
-SBO_TITLE_POLICY=redacted sbo-ingest path/to/export.zip
+```
+src/sbo_ingestion/      Python package: ingest and distill CLIs, handlers, audit log
+tests/                  pytest suite and export fixtures
+scripts/                setup and verify-privacy (bash and PowerShell), Kura helpers
+templates/              brain-vault-skeleton and private-vault-skeleton
+.claude/commands/       the five agent commands
+docs/                   guides listed below
+mcp.json                MCP dependency and vault-root declaration
+AGENTS.md, SKILL.md, CANON.md   agent contracts and SIP manifests
 ```
 
-Headings and index rows fall back to the conversation token. The real title stays in `private/`, where the distilling agent still reads it.
+## Documentation
 
-Read `docs/privacy-model.md` before ingesting sensitive content. Run `scripts/verify-privacy.{ps1,sh}` weekly.
+| Doc | Covers |
+|---|---|
+| [Getting started](docs/getting-started.md) | Full walkthrough including Obsidian and MCP |
+| [Ingestion guide](docs/ingestion-guide.md) | Requesting exports and running `sbo-ingest` |
+| [Capture and automation](docs/automation.md) | Kura captures, repeat processing, recovery |
+| [Native intake](docs/native-intake.md) | Chrome native host and packet-based distilling |
+| [Idea capture](docs/idea-capture.md) | The idea-capture packet format |
+| [Archive search](docs/archive-search.md) | Cited search over the brain vault |
+| [Obsidian MCP setup](docs/obsidian-mcp.md) | Connecting Claude Code or Claude Desktop to the brain vault |
+| [Privacy model](docs/privacy-model.md) | Threat model and hardening checklist |
+| [Architecture](docs/architecture.md) | Edges, vaults, folder ownership |
+| [Reflection engine](docs/reflection-engine.md) | The pipeline behind `/reflect` and its verify checks |
+| [Cross-AI portability](docs/cross-ai-portability.md) | Running the commands from other agents |
+| [Continuity](docs/continuity.md) | Session continuity and recovery |
+| [Composition guide](docs/composition-guide.md) | Optional wiring to other Starlight components |
+| [Swarm curation](docs/swarm-curation.md) | Optional multi-model curation pattern |
+| [MCP usage policy](docs/mcp-usage-policy.md) | Rules for MCP use in this project |
+| [Paid tier](docs/paid-tier.md) | What the planned paid package adds |
+| [Changelog](CHANGELOG.md) | Release history |
 
-## Composition
+## Open source and paid tier
 
-SBO is a vertical that composes SIP. It declines canon. The personal-instance pattern symlinks live commands and skills from your other substrates — see `docs/composition-guide.md`. The OSS template stands alone with no external dependencies beyond Python + Obsidian.
+Everything in this repository is free and MIT licensed: the two vault skeletons, the ingestion pipeline, the two starter agents (`people-map` and `pattern-detector`), the privacy scripts, the setup scripts, and the docs. `docs/paid-tier.md` calls this "a complete substrate" that you can use indefinitely without paying.
 
-(Anthropic API is optional — needed only for `--mode api`.)
+The same page describes a planned paid package, `@frankx/second-brain-pro`, which would add eight further agents and live in a separate repository. Its status there is "not yet shipped". [docs/paid-tier.md](docs/paid-tier.md) is the source of truth for that boundary.
 
-## Testing
+## Contributing
 
-```bash
-pytest -v
-```
+Read [CONTRIBUTING.md](CONTRIBUTING.md) first. The short version:
 
-Test suite, zero-setup (root `conftest.py` puts `src/` on `sys.path`): Claude.ai handler incl. per-conversation summary capture, ChatGPT JSON + fail-closed sharded ZIP handling, memories.json handling, identity-addressed idempotent dual-write, promoted-note preservation, path-containment guards, `_INDEX.md` corpus maps, private import receipts, all three ingest modes, audit logging, and zero-setup guards. CI runs the full matrix on ubuntu / macos / windows × Python 3.11 / 3.12 / 3.13.
+- `pytest` must pass. CI runs it on Ubuntu, macOS and Windows with Python 3.11, 3.12 and 3.13.
+- If you touch `scripts/`, `templates/`, or `src/sbo_ingestion/dual_write.py`, also run `bash scripts/verify-privacy.sh templates/private-vault-skeleton`.
+- Changes that give MCP a path into `private/`, or that add a mandatory cloud dependency, are not accepted.
+
+The project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+MIT. Copyright (c) 2026 Frank Riemer. See [LICENSE](LICENSE).
 
-## Built on SIP
-
-Starlight Intelligence Protocol v1.1.1. See [Starlight-Intelligence-System](https://github.com/frankxai/Starlight-Intelligence-System).
-
----
-
-Built by [Frank Riemer](https://frankx.ai). For builders, not consumers.
+SBO is built on the Starlight Intelligence Protocol (SIP) v1.1.1. See [Starlight-Intelligence-System](https://github.com/frankxai/Starlight-Intelligence-System).
