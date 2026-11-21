@@ -17,6 +17,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Version
   re-ingestion, path-safe source IDs, and atomic raw/brain/index writes.
 - Private completed-import receipts with selected ZIP members and created/preserved
   conversation counts.
+- Private ChatGPT artifact index (`sbo.chatgpt-artifacts.v1`): every image, upload,
+  attachment and tool-output file a conversation references is matched against the
+  export ZIP and recorded with the member name and SHA-256, or with the reason it
+  could not be verified. Nothing is extracted or written to the brain vault.
+  `sbo-artifacts --private-root …` prints the per-export coverage.
 
 ### Changed
 
