@@ -34,7 +34,7 @@ import frontmatter
 from anthropic import AnthropicError
 from yaml import YAMLError
 
-from sbo_ingestion import audit, chatgpt_archive
+from sbo_ingestion import audit, chatgpt_archive, chatgpt_artifacts
 from sbo_ingestion.dual_write import (
     DualWriteResult,
     _assert_descendant,
@@ -382,15 +382,17 @@ def _ingest_file(
     with audit.exclusive_lock(lock):
         snapshot, batch = chatgpt_archive.preserve_export(export_path, private_root)
         kwargs["memories_path"] = _find_memories(export_path, kwargs.get("memories_path"))
-        return _ingest_file_unlocked(
-            snapshot,
-            brain_root=brain_root,
-            private_root=private_root,
-            account_scope=account_scope,
-            source_name=export_path.name,
-            batch=batch,
-            **kwargs,
-        )
+        with chatgpt_artifacts.ExportAssets(snapshot) as export_assets:
+            return _ingest_file_unlocked(
+                snapshot,
+                brain_root=brain_root,
+                private_root=private_root,
+                account_scope=account_scope,
+                source_name=export_path.name,
+                batch=batch,
+                export_assets=export_assets,
+                **kwargs,
+            )
 
 
 def _ingest_file_unlocked(
@@ -406,6 +408,7 @@ def _ingest_file_unlocked(
     account_scope: str | None = None,
     source_name: str | None = None,
     batch: str = "",
+    export_assets: chatgpt_artifacts.ExportAssets | None = None,
 ) -> list[DualWriteResult]:
     """Ingest a single export file with an already-resolved mode."""
     normalized_fmt = format.lower().replace("_", "-") if format else None
@@ -451,6 +454,7 @@ def _ingest_file_unlocked(
         raise ValueError(f"Unsupported format: {fmt}")
 
     source_name = source_name or export_path.name
+    artifact_records = []
     records = []
     results: list[DualWriteResult] = []
     index_convos = []
@@ -524,6 +528,10 @@ def _ingest_file_unlocked(
                     "refresh_pending": result.brain_preserved and result.source_revised,
                 }
             )
+            if export_assets is not None:
+                artifact = chatgpt_artifacts.preserve_manifest(graph, export_assets, private_root)
+                if artifact is not None:
+                    artifact_records.append(artifact)
         # Keep only index metadata. Message bodies may be gigabytes across a full
         # export and have already been written to the private vault.
         index_convos.append(replace(convo, messages=(), source_graph=None))
@@ -547,6 +555,15 @@ def _ingest_file_unlocked(
             members=selected_members,
             records=records,
         )
+        if export_assets is not None:
+            chatgpt_artifacts.write_receipt(
+                private_root,
+                batch=batch,
+                account_scope=account_scope,
+                export=export_assets,
+                scanned=len(records),
+                records=artifact_records,
+            )
     if any(not r.source_unchanged for r in results) or not results:
         audit.record_import_receipt(
             private_root,
